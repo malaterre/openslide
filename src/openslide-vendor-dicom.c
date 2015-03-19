@@ -205,6 +205,19 @@ static bool dicom_wsmis_detect(const char *filename,
   return true;
 }
 
+static int width_compare(gconstpointer a, gconstpointer b) {
+  const struct level *la = *(const struct level **) a;
+  const struct level *lb = *(const struct level **) b;
+
+  if (la->dicoml.image_w > lb->dicoml.image_w) {
+    return -1;
+  } else if (la->dicoml.image_w == lb->dicoml.image_w) {
+    return 0;
+  } else {
+    return 1;
+  }
+}
+
 static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                               struct _openslide_tifflike *tl G_GNUC_UNUSED,
                               struct _openslide_hash *quickhash1, GError **err) {
@@ -258,16 +271,28 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                                             read_tile);
 
     // add to array
+    if( !dicoml->is_icon )
     g_ptr_array_add(level_array, l);
 
     ++fullpath;
     }
+  // sort tiled levels
+  g_ptr_array_sort(level_array, width_compare);
+
+  // FIXME:
   _openslide_hash_string(quickhash1, "1.2.826.0.1.3244452.1.0.52857.974040379.376499.438437.556598.585" );
 
+  // unwrap level array
+  int32_t level_count = level_array->len;
   struct level **levels =
     (struct level **) g_ptr_array_free(level_array, false);
+  level_array = NULL;
 
+  // store osr data
+  //g_assert(osr->data == NULL);
+  g_assert(osr->levels == NULL);
   osr->levels = (struct _openslide_level **) levels;
+  osr->level_count = level_count;
 
   return true;
 }

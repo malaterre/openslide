@@ -50,6 +50,7 @@ struct _openslide_dicom_level {
   int64_t tiles_across;
   int64_t tiles_down;
   //uint16_t photometric;
+  bool is_icon;
 };
 
 bool _openslide_dicom_level_init(struct _openslide_dicom *instance,

@@ -995,13 +995,14 @@ static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, 
         break;
       case MAKE_TAG(0x0008,0x0100):
         assert( len < 16 );
-        strncpy( di->code_value, buf, len );
+        strncpy( di->code_value, buf, len + 1 );
         break;
       default:
         assert(0);
       }
     }
 }
+
 static bool read_dataset( dataset * ds, FILE * stream )
 {
   static const tag_t pixel_data = MAKE_TAG( 0x7fe0,0x0010 );
@@ -1307,6 +1308,12 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
 
     //tiffl->tile_read_direct = read_direct;
     //tiffl->photometric = photometric;
+    dicoml->is_icon = false;
+    if( strcmp( di.code_value, "A-00118 " ) == 0 )
+      {
+      dicoml->is_icon = true;
+      }
+
   }
 
   return true;
