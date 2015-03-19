@@ -239,14 +239,13 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
     // create level
     struct level *l = g_slice_new0(struct level);
     struct _openslide_dicom_level *dicoml = &l->dicoml;
-    //if (!_openslide_tiff_level_init(tiff,
-    //                                TIFFCurrentDirectory(tiff),
-    //                                (struct _openslide_level *) l,
-    //                                tiffl,
-    //                                err)) {
-    //  g_slice_free(struct level, l);
-    //  goto FAIL;
-    //}
+    if (!_openslide_dicom_level_init(*fullpath,
+                                    (struct _openslide_level *) l,
+                                    dicoml,
+                                    err)) {
+      g_slice_free(struct level, l);
+      assert(0);
+    }
     l->grid = _openslide_grid_create_simple(osr,
                                             dicoml->tiles_across,
                                             dicoml->tiles_down,
@@ -259,6 +258,8 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
 
     ++fullpath;
     }
+  _openslide_hash_string(quickhash1, "1.2.826.0.1.3244452.1.0.52857.974040379.376499.438437.556598.585" );
+
   struct level **levels =
     (struct level **) g_ptr_array_free(level_array, false);
 

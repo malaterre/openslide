@@ -458,15 +458,12 @@ bool find_tag_path( tag_path_set *tps, tag_path *tp )
 
 bool match_tag_path( tag_path_set *tps, tag_path *tp )
 {
-#if 1
-  return true;
-#else
   int s;
   int total = 0;
   tag_path ref;
   for( s = 0; s < tps->nsets; ++s )
     {
-    tag * ptr = tps->tags + total;
+    tag_t * ptr = tps->tags + total;
     ref.tags = ptr;
     ref.ntags = ref.size = tps->ntags[s];
     
@@ -475,7 +472,6 @@ bool match_tag_path( tag_path_set *tps, tag_path *tp )
     total += tps->ntags[s];
     }
   return false;
-#endif
 }
 
 void add_tag_path( tag_path_set *tps, tag_path *tp )
@@ -890,7 +886,6 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
 
 static void handle_attribute( /*const*/ dataset * ds, const data_element * de, source * s )
 {
-  //char **filenames = (char**)ds->data;
   GSList * list = (GList*)ds->data;
   (void)ds;
   (void)s;
@@ -902,23 +897,23 @@ static void handle_attribute( /*const*/ dataset * ds, const data_element * de, s
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
-    print_path( ds->cur_tp );
-    //assert( s );
+    //print_path( ds->cur_tp );
     size_t len = source_size(s);
     char buf[128];
     assert( len < 127 );
     bool b = source_read( s, buf, len );
     assert(b);
     buf[len] = 0;
+    // change windows style backslash into UNIX style forward slash
     char * p = buf;
     while( *p )
       {
       if( *p == '\\' ) *p = '/';
       ++p;
       }
-    printf( "%s\n", buf );
+    //printf( "%s\n", buf );
     list = g_slist_append (list, strdup(buf));
-    printf( "%d\n", g_slist_length (list) );
+    //printf( "%d\n", g_slist_length (list) );
     }
   ds->data = list;
 }
@@ -1026,72 +1021,9 @@ static bool read_dataset2( dataset * ds, FILE * stream )
   return true;
 }
 
-#if 0
-typedef struct wsmis
-{
-  FILE * stream;
-  dataset ds;
-} wsmis;
-
-wsmis * create_wsmis_from_file(const char * filename)
-{
-  wsmis *instance = (wsmis*)malloc( sizeof *instance );
-
-  //instance->stream = fopen( filename, "rb" );
-  //FILE *f = _openslide_fopen(filename, "rb", err);
-
-  instance->ds.cur_tp = create_tag_path();
-  instance->ds.tps = create_tag_path_set();
-
-  // 5200,9230>0048,021a
-    {
-    tag_path *tp = create_tag_path();
-    const tag_t t0 = MAKE_TAG(0x5200,0x9230);
-    const tag_t t1 = MAKE_TAG(0x0048,0x021a);
-    const tag_t t2 = MAKE_TAG(0x0048,0x021f);
-    push_tag(
-      push_tag(
-        push_tag( tp, t0 ), t1 ), t2);
-    add_tag_path( instance->ds.tps, tp );
-    destroy_path( tp );
-    }
-  instance->ds.handle_attribute = handle_attribute;
-
-  return instance;
-}
-
-int read_header( wsmis * instance )
-{
-  if(  !read_preamble( instance->stream )
-    || !read_meta( instance->stream )
-    || !read_dataset( &instance->ds, instance->stream ) )
-    {
-    return 0;
-    }
-
-  return 1;
-}
-
-void delete_wsmis( wsmis * instance )
-{
-  destroy_path( instance->ds.cur_tp );
-  destroy_path_set( instance->ds.tps );
-
-  fclose( instance->stream );
-  free( instance );
-}
-#endif
-
-//struct node {
-//  char * filename;
-//  char * next;
-//};
 struct _openslide_dicom {
-  //char *filename;
   FILE * stream;
   dataset ds;
-//  char **filenames;
-//  struct node * root;
   GSList *filenames;
 };
 
@@ -1162,6 +1094,7 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
     {
     char *name = (char*)fn->data;
     datafile_paths[i] = g_build_filename(dirname, name, NULL);
+    free( name ); // strdup'ed
     ++i;
     }
   datafile_paths[len] = NULL;
@@ -1196,3 +1129,45 @@ void _openslide_dicom_destroy(struct _openslide_dicom *instance) {
           (0008,0104) LO [Slide overview lens ]                     # 20,1 Code Meaning 
       (fffe,e0dd)  
 */
+bool _openslide_dicom_level_init(const char *filename,
+                                struct _openslide_level *level,
+                                struct _openslide_dicom_level *dicoml,
+                                GError **err)
+{
+  // figure out tile size
+  int64_t tw, th;
+  tw = 512;
+  th = 512;
+//  GET_FIELD_OR_FAIL(tiff, TIFFTAG_TILEWIDTH, uint32_t, tw);
+//  GET_FIELD_OR_FAIL(tiff, TIFFTAG_TILELENGTH, uint32_t, th);
+
+  // get image size
+  int64_t iw, ih;
+
+  // safe now, start writing
+  if (level) {
+    level->w = iw;
+    level->h = ih;
+    // tile size hints
+    level->tile_w = tw;
+    level->tile_h = th;
+  }
+
+  if (dicoml) {
+    //tiffl->dir = dir;
+    dicoml->image_w = iw;
+    dicoml->image_h = ih;
+    dicoml->tile_w = tw;
+    dicoml->tile_h = th;
+
+    // num tiles in each dimension
+    dicoml->tiles_across = (iw / tw) + !!(iw % tw);   // integer ceiling
+    dicoml->tiles_down = (ih / th) + !!(ih % th);
+
+    //tiffl->tile_read_direct = read_direct;
+    //tiffl->photometric = photometric;
+  }
+
+  return true;
+
+}
