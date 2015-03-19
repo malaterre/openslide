@@ -46,8 +46,8 @@ struct level {
 };
 
 static void destroy(openslide_t *osr) {
-#if 0
   struct dicom_wsmis_ops_data *data = osr->data;
+#if 0
   _openslide_dicomcache_destroy(data->tc);
   g_slice_free(struct dicom_wsmis_ops_data, data);
 
@@ -188,6 +188,7 @@ static bool dicom_wsmis_detect(const char *filename,
   return true;
 }
 
+#if 0
 struct dicom_patient {
   struct dicom_patient * next;
   struct dicom_study * study;
@@ -206,17 +207,22 @@ struct dicom_series {
 struct dicom_image {
   struct dicom_image * next;
 };
+#endif
 
-static bool dicom_wsmis_open(openslide_t *osr,
-                              const char *filename,
-                              struct _openslide_dicomlike *tl,
-                              struct _openslide_hash *quickhash1,
-                              GError **err) {
+static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
+                              struct _openslide_tifflike *tl G_GNUC_UNUSED,
+                              struct _openslide_hash *quickhash1, GError **err) {
   char *dirname = NULL;
   // get directory from filename
   dirname = g_strndup(filename, strlen(filename) - strlen("DICOMDIR"));
 
   struct _openslide_dicom * instance = _openslide_dicom_create(filename, err);
+  struct dicom_wsmis_ops_data *data = g_slice_new0(struct dicom_wsmis_ops_data);
+  osr->data = data;
+
+  // set ops
+  osr->ops = &dicom_wsmis_ops;
+
   if(!_openslide_dicom_readindex(instance, err))
     {
     return false;
