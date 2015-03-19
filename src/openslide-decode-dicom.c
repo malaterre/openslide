@@ -100,7 +100,7 @@ static bool source_skip( source * s, uint32_t len )
     s->cur_pos += llen;
     }
   assert( s->cur_pos <= s->max_len );
-  return b && len == llen;
+  return b /*&& len == llen*/;
 }
 
 static bool read_preamble(FILE * stream)
@@ -408,9 +408,8 @@ void print_path( tag_path * tp )
   for( t = 0; t < tp->ntags; ++t )
     {
     if( t != 0 ) fprintf(stdout, ">" );
-    tag_t * ptr = tp->tags+t;
-    assert(0);
-    //fprintf(stdout, "%04x,%04x", ptr->tags[0], ptr->tags[1] );
+    const tag_t * ptr = tp->tags + t;
+    fprintf(stdout, "%04x,%04x", get_group(*ptr), get_element(*ptr) );
     }
   fprintf(stdout, "\n" );
 }
@@ -502,7 +501,8 @@ typedef struct dataset dataset;
 struct dataset {
   tag_path *cur_tp;
   tag_path_set *tps;
-  void (*handle_attribute)(const dataset * ds, const data_element * de, source * value);
+  void (*handle_attribute)(/*const*/ dataset * ds, const data_element * de, source * value);
+  void *data;
 };
 
 tag_path * get_tag_path( dataset * ds )
@@ -888,21 +888,39 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
     }
 }
 
-static void handle_attribute( const dataset * ds, const data_element * de, source * s )
+static void handle_attribute( /*const*/ dataset * ds, const data_element * de, source * s )
 {
+  //char **filenames = (char**)ds->data;
+  GSList * list = (GList*)ds->data;
   (void)ds;
   (void)s;
   uvr_t u;
   u.vr = de->vr;
   assert( de->vr != E_INVALID );
-  print_indent(ds);
-  printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
+  //print_indent(ds);
+  //printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
-    //print_path( ds->cur_tp );
+    print_path( ds->cur_tp );
     //assert( s );
+    size_t len = source_size(s);
+    char buf[128];
+    assert( len < 127 );
+    bool b = source_read( s, buf, len );
+    assert(b);
+    buf[len] = 0;
+    char * p = buf;
+    while( *p )
+      {
+      if( *p == '\\' ) *p = '/';
+      ++p;
+      }
+    printf( "%s\n", buf );
+    list = g_slist_append (list, strdup(buf));
+    printf( "%d\n", g_slist_length (list) );
     }
+  ds->data = list;
 }
 
 static bool read_dataset( dataset * ds, FILE * stream )
@@ -958,6 +976,54 @@ static bool read_dataset( dataset * ds, FILE * stream )
     return true;
     }
   return false;
+}
+
+static bool read_dataset2( dataset * ds, FILE * stream )
+{
+  data_element de = { 0 /* tag */ };
+  while( read_explicit( &de, stream ) )
+    {
+    assert( get_group( de.tag ) != 0xfffe );
+    assert( get_group( de.tag ) <= 0x7fe0 );
+    push_tag( ds->cur_tp, de.tag );
+    if( is_undef_len(&de) )
+      {
+      if( de.vr != E_SQ )
+        {
+        assert( de.vr == E_UN ); // IVRLE !
+        assert(0);
+        }
+      process_attribute( ds, &de, stream );
+      read_sq_undef(ds, stream);
+      }
+    else
+      {
+      // FIXME: technically a Sequence could be stored with VR:UN, this does
+      // not make sense in the WSI world, thus it is not handled.
+      if( de.vr == E_SQ )
+        {
+        tag_path * tp = get_tag_path( ds );
+        const bool b = match_tag_path( ds->tps, tp );
+        if( !b )
+          {
+          // skip over an entire SQ
+          assert( de.vr == E_SQ );
+          fseeko(stream, de.vl, SEEK_CUR );
+          }
+        else
+          {
+          read_sq_def( ds, stream, de.vl );
+          }
+        }
+      else
+        {
+        process_attribute( ds, &de, stream );
+        }
+      }
+    pop_tag( ds->cur_tp );
+    }
+  assert( feof( stream ) );
+  return true;
 }
 
 #if 0
@@ -1016,10 +1082,36 @@ void delete_wsmis( wsmis * instance )
 }
 #endif
 
+//struct node {
+//  char * filename;
+//  char * next;
+//};
 struct _openslide_dicom {
   //char *filename;
   FILE * stream;
   dataset ds;
+//  char **filenames;
+//  struct node * root;
+  GSList *filenames;
+};
+
+struct dicom_patient {
+  struct dicom_patient * next;
+  struct dicom_study * study;
+};
+
+struct dicom_study {
+  struct dicom_study * next;
+  struct dicom_series * series;
+};
+
+struct dicom_series {
+  struct dicom_series * next;
+  struct dicom_image * image;
+};
+
+struct dicom_image {
+  struct dicom_image * next;
 };
 
 struct _openslide_dicom *_openslide_dicom_create(const char *filename,
@@ -1039,13 +1131,38 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
 
 bool _openslide_dicom_readindex(struct _openslide_dicom *instance, GError **err)
 {
+  // (0004,1500) CS [CDCAB791\CDCAB791\7A474CCD\CDCAB790 ]         # 36,1-8 Referenced File ID
+  // 0004,1220>0004,1500
+    {
+    tag_path *tp = create_tag_path();
+    const tag_t t0 = MAKE_TAG(0x0004,0x1220);
+    const tag_t t1 = MAKE_TAG(0x0004,0x1500);
+    push_tag( push_tag( tp, t0 ), t1 );
+    add_tag_path( instance->ds.tps, tp );
+    destroy_path( tp );
+    }
+
+  instance->filenames = NULL;
+  instance->ds.data = instance->filenames;
   instance->ds.handle_attribute = handle_attribute;
   if(  !read_preamble( instance->stream )
     || !read_meta( instance->stream )
-    || !read_dataset( &instance->ds, instance->stream ) )
+    || !read_dataset2( &instance->ds, instance->stream ) )
     {
+    assert(0);
     return false;
     }
+  guint len = g_slist_length (instance->ds.data);
+    printf ("DEBUG: %d\n", len );
+  GSList * fn;
+  for (fn = instance->ds.data; fn != NULL;
+    fn = g_slist_next (fn))
+    {
+    char *s = (char*)fn->data;
+    //GString * ss = fn->data;
+    printf ("DEBUG: %s\n", s );
+    }
+  g_slist_free (instance->ds.data);
 
   return true;
 }

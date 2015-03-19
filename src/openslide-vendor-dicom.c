@@ -35,8 +35,25 @@
 #include <stdlib.h>
 #include <assert.h>
 
+struct image {
+  int32_t fileno;
+  int32_t start_in_file;
+  int32_t length;
+  int32_t imageno;   // used only for cache lookup
+  int refcount;
+};
+
+struct tile {
+  struct image *image;
+
+  // location in the image
+  double src_x;
+  double src_y;
+};
+
 struct dicom_wsmis_ops_data {
-  struct _openslide_dicomcache *tc;
+  //struct _openslide_dicomcache *tc;
+  gchar **datafile_paths;
 };
 
 struct level {
@@ -188,27 +205,6 @@ static bool dicom_wsmis_detect(const char *filename,
   return true;
 }
 
-#if 0
-struct dicom_patient {
-  struct dicom_patient * next;
-  struct dicom_study * study;
-};
-
-struct dicom_study {
-  struct dicom_study * next;
-  struct dicom_series * series;
-};
-
-struct dicom_series {
-  struct dicom_series * next;
-  struct dicom_image * image;
-};
-
-struct dicom_image {
-  struct dicom_image * next;
-};
-#endif
-
 static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                               struct _openslide_tifflike *tl G_GNUC_UNUSED,
                               struct _openslide_hash *quickhash1, GError **err) {
@@ -217,6 +213,7 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
   dirname = g_strndup(filename, strlen(filename) - strlen("DICOMDIR"));
 
   struct _openslide_dicom * instance = _openslide_dicom_create(filename, err);
+
   struct dicom_wsmis_ops_data *data = g_slice_new0(struct dicom_wsmis_ops_data);
   osr->data = data;
 
@@ -225,125 +222,13 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
 
   if(!_openslide_dicom_readindex(instance, err))
     {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+      "Could not read DICOMDIR");
     return false;
     }
   _openslide_dicom_destroy(instance);
 
-#if 0
-  GPtrArray *level_array = g_ptr_array_new();
-
-  // open dicom
-  struct _openslide_dicomcache *tc = _openslide_dicomcache_create(filename);
-  dicom *dicom = _openslide_dicomcache_get(tc, err);
-  if (!dicom) {
-    goto FAIL;
-  }
-
-  // accumulate tiled levels
-  do {
-    // confirm that this directory is tiled
-    if (!dicomIsTiled(dicom)) {
-      continue;
-    }
-
-    // confirm it is either the first image, or reduced-resolution
-    if (dicomCurrentDirectory(dicom) != 0) {
-      uint32_t subfiletype;
-      if (!dicomGetField(dicom, dicomTAG_SUBFILETYPE, &subfiletype)) {
-        continue;
-      }
-
-      if (!(subfiletype & FILETYPE_REDUCEDIMAGE)) {
-        continue;
-      }
-    }
-
-    // verify that we can read this compression (hard fail if not)
-    uint16_t compression;
-    if (!dicomGetField(dicom, dicomTAG_COMPRESSION, &compression)) {
-      g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                  "Can't read compression scheme");
-      goto FAIL;
-    };
-    if (!dicomIsCODECConfigured(compression)) {
-      g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                  "Unsupported dicom compression: %u", compression);
-      goto FAIL;
-    }
-
-    // create level
-    struct level *l = g_slice_new0(struct level);
-    struct _openslide_dicom_level *dicoml = &l->dicoml;
-    if (!_openslide_dicom_level_init(dicom,
-                                    dicomCurrentDirectory(dicom),
-                                    (struct _openslide_level *) l,
-                                    dicoml,
-                                    err)) {
-      g_slice_free(struct level, l);
-      goto FAIL;
-    }
-    l->grid = _openslide_grid_create_simple(osr,
-                                            dicoml->tiles_across,
-                                            dicoml->tiles_down,
-                                            dicoml->tile_w,
-                                            dicoml->tile_h,
-                                            read_tile);
-
-    // add to array
-    g_ptr_array_add(level_array, l);
-  } while (dicomReadDirectory(dicom));
-
-  // sort tiled levels
-  g_ptr_array_sort(level_array, width_compare);
-
-  // set hash and properties
-  struct level *top_level = level_array->pdata[level_array->len - 1];
-  if (!_openslide_dicomlike_init_properties_and_hash(osr, tl, quickhash1,
-                                                    top_level->dicoml.dir,
-                                                    0,
-                                                    err)) {
-    goto FAIL;
-  }
-
-  // unwrap level array
-  int32_t level_count = level_array->len;
-  struct level **levels =
-    (struct level **) g_ptr_array_free(level_array, false);
-  level_array = NULL;
-
-  // allocate private data
-  struct dicom_wsmis_ops_data *data =
-    g_slice_new0(struct dicom_wsmis_ops_data);
-
-  // store osr data
-  g_assert(osr->data == NULL);
-  g_assert(osr->levels == NULL);
-  osr->levels = (struct _openslide_level **) levels;
-  osr->level_count = level_count;
-  osr->data = data;
-  osr->ops = &dicom_wsmis_ops;
-
-  // put dicom handle and store dicomcache reference
-  _openslide_dicomcache_put(tc, dicom);
-  data->tc = tc;
-
   return true;
-
- FAIL:
-  // free the level array
-  if (level_array) {
-    for (uint32_t n = 0; n < level_array->len; n++) {
-      struct level *l = level_array->pdata[n];
-      _openslide_grid_destroy(l->grid);
-      g_slice_free(struct level, l);
-    }
-    g_ptr_array_free(level_array, true);
-  }
-  // free dicom
-  _openslide_dicomcache_put(tc, dicom);
-  _openslide_dicomcache_destroy(tc);
-#endif
-  return false;
 }
 
 const struct _openslide_format _openslide_format_dicom_wsmis = {
