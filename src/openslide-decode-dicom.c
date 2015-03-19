@@ -1037,6 +1037,19 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
   return instance;
 }
 
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, GError **err)
+{
+  instance->ds.handle_attribute = handle_attribute;
+  if(  !read_preamble( instance->stream )
+    || !read_meta( instance->stream )
+    || !read_dataset( &instance->ds, instance->stream ) )
+    {
+    return false;
+    }
+
+  return true;
+}
+
 void _openslide_dicom_destroy(struct _openslide_dicom *instance) {
   if (instance == NULL) {
     return;
@@ -1048,3 +1061,17 @@ void _openslide_dicom_destroy(struct _openslide_dicom *instance) {
 
   g_slice_free(struct _openslide_dicom, instance);
 }
+
+
+/*
+(0048,0105) SQ (Sequence with undefined length)                   # u/l,1 Optical Path
+    (fffe,e000) na (Item with undefined length) 
+      (0022,0016) SQ (Sequence with undefined length)               # u/l,1 Illumination
+      (fffe,e0dd)                                                                       
+      (0022,0019) SQ (Sequence with undefined length)               # u/l,1 Lenses Code 
+        (fffe,e000) na (Item with defined length)                                       
+          (0008,0100) SH [A-00118 ]                                 # 8,1 Code Value    
+          (0008,0102) SH [SRT ]                                     # 4,1 Coding Scheme 
+          (0008,0104) LO [Slide overview lens ]                     # 20,1 Code Meaning 
+      (fffe,e0dd)  
+*/

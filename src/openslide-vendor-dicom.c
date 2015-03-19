@@ -215,7 +215,13 @@ static bool dicom_wsmis_open(openslide_t *osr,
   char *dirname = NULL;
   // get directory from filename
   dirname = g_strndup(filename, strlen(filename) - strlen("DICOMDIR"));
-assert(0);
+
+  struct _openslide_dicom * instance = _openslide_dicom_create(filename, err);
+  if(!_openslide_dicom_readindex(instance, err))
+    {
+    return false;
+    }
+  _openslide_dicom_destroy(instance);
 
 #if 0
   GPtrArray *level_array = g_ptr_array_new();

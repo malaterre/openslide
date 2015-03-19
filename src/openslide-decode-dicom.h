@@ -37,6 +37,8 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
 
 void _openslide_dicom_destroy(struct _openslide_dicom *d);
 
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, GError **err);
+
 // helpful printout?
 //void _openslide_dicomdir_print(struct _openslide_dicom *d);
 
