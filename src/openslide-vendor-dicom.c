@@ -37,7 +37,7 @@
 #include <stdlib.h>
 #include <tiffio.h>
 
-struct generic_dicom_ops_data {
+struct dicom_wsi_ops_data {
   struct _openslide_dicomcache *tc;
 };
 
@@ -48,9 +48,9 @@ struct level {
 };
 
 static void destroy(openslide_t *osr) {
-  struct generic_dicom_ops_data *data = osr->data;
+  struct dicom_wsi_ops_data *data = osr->data;
   _openslide_dicomcache_destroy(data->tc);
-  g_slice_free(struct generic_dicom_ops_data, data);
+  g_slice_free(struct dicom_wsi_ops_data, data);
 
   for (int32_t i = 0; i < osr->level_count; i++) {
     struct level *l = (struct level *) osr->levels[i];
@@ -122,7 +122,7 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                          struct _openslide_level *level,
                          int32_t w, int32_t h,
                          GError **err) {
-  struct generic_dicom_ops_data *data = osr->data;
+  struct dicom_wsi_ops_data *data = osr->data;
   struct level *l = (struct level *) level;
 
   dicom *dicom = _openslide_dicomcache_get(data->tc, err);
@@ -140,12 +140,12 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
   return success;
 }
 
-static const struct _openslide_ops generic_dicom_ops = {
+static const struct _openslide_ops dicom_wsi_ops = {
   .paint_region = paint_region,
   .destroy = destroy,
 };
 
-static bool generic_dicom_detect(const char *filename G_GNUC_UNUSED,
+static bool dicom_wsi_detect(const char *filename G_GNUC_UNUSED,
                                 struct _openslide_dicomlike *tl,
                                 GError **err) {
   // ensure we have a dicom
@@ -178,7 +178,7 @@ static int width_compare(gconstpointer a, gconstpointer b) {
   }
 }
 
-static bool generic_dicom_open(openslide_t *osr,
+static bool dicom_wsi_open(openslide_t *osr,
                               const char *filename,
                               struct _openslide_dicomlike *tl,
                               struct _openslide_hash *quickhash1,
@@ -265,8 +265,8 @@ static bool generic_dicom_open(openslide_t *osr,
   level_array = NULL;
 
   // allocate private data
-  struct generic_dicom_ops_data *data =
-    g_slice_new0(struct generic_dicom_ops_data);
+  struct dicom_wsi_ops_data *data =
+    g_slice_new0(struct dicom_wsi_ops_data);
 
   // store osr data
   g_assert(osr->data == NULL);
@@ -274,7 +274,7 @@ static bool generic_dicom_open(openslide_t *osr,
   osr->levels = (struct _openslide_level **) levels;
   osr->level_count = level_count;
   osr->data = data;
-  osr->ops = &generic_dicom_ops;
+  osr->ops = &dicom_wsi_ops;
 
   // put dicom handle and store dicomcache reference
   _openslide_dicomcache_put(tc, dicom);
@@ -298,9 +298,9 @@ static bool generic_dicom_open(openslide_t *osr,
   return false;
 }
 
-const struct _openslide_format _openslide_format_generic_dicom = {
-  .name = "generic-dicom",
-  .vendor = "generic-dicom",
-  .detect = generic_dicom_detect,
-  .open = generic_dicom_open,
+const struct _openslide_format _openslide_format_dicom_wsi = {
+  .name = "dicom-wsi",
+  .vendor = "dicom-wsi",
+  .detect = dicom_detect,
+  .open = dicom_open,
 };
