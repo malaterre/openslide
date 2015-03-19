@@ -42,4 +42,14 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
 // helpful printout?
 //void _openslide_dicomdir_print(struct _openslide_dicom *d);
 
+struct _openslide_dicom_level {
+  int64_t image_w;
+  int64_t image_h;
+  int64_t tile_w;
+  int64_t tile_h;
+  int64_t tiles_across;
+  int64_t tiles_down;
+  //uint16_t photometric;
+};
+
 #endif

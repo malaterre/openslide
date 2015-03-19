@@ -29,28 +29,28 @@
 #include <config.h>
 
 #include "openslide-private.h"
+#include "openslide-decode-dicom.h"
 
 #include <glib.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 
-struct image {
-  int32_t fileno;
-  int32_t start_in_file;
-  int32_t length;
-  int32_t imageno;   // used only for cache lookup
-  int refcount;
-};
-
-struct tile {
-  struct image *image;
-
-  // location in the image
-  double src_x;
-  double src_y;
-};
-
+//struct image {
+//  int32_t fileno;
+//  int32_t start_in_file;
+//  int32_t length;
+//  int32_t imageno;   // used only for cache lookup
+//  int refcount;
+//};
+//
+//struct tile {
+//  struct image *image;
+//
+//  // location in the image
+//  double src_x;
+//  double src_y;
+//};
 struct dicom_wsmis_ops_data {
   //struct _openslide_dicomcache *tc;
   gchar **datafile_paths;
@@ -58,7 +58,7 @@ struct dicom_wsmis_ops_data {
 
 struct level {
   struct _openslide_level base;
-//  struct _openslide_dicom_level dicoml;
+  struct _openslide_dicom_level dicoml;
   struct _openslide_grid *grid;
 };
 
@@ -231,11 +231,38 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
 
   // accumulate tiled levels
   char ** fullpath = datafile_paths;
+  GPtrArray *level_array = g_ptr_array_new();
   while( *fullpath )
     {
     printf( "ICI: %s\n", *fullpath );
+
+    // create level
+    struct level *l = g_slice_new0(struct level);
+    struct _openslide_dicom_level *dicoml = &l->dicoml;
+    //if (!_openslide_tiff_level_init(tiff,
+    //                                TIFFCurrentDirectory(tiff),
+    //                                (struct _openslide_level *) l,
+    //                                tiffl,
+    //                                err)) {
+    //  g_slice_free(struct level, l);
+    //  goto FAIL;
+    //}
+    l->grid = _openslide_grid_create_simple(osr,
+                                            dicoml->tiles_across,
+                                            dicoml->tiles_down,
+                                            dicoml->tile_w,
+                                            dicoml->tile_h,
+                                            read_tile);
+
+    // add to array
+    g_ptr_array_add(level_array, l);
+
     ++fullpath;
     }
+  struct level **levels =
+    (struct level **) g_ptr_array_free(level_array, false);
+
+  osr->levels = (struct _openslide_level **) levels;
 
   return true;
 }
