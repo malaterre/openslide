@@ -36,21 +36,6 @@
 #include <stdlib.h>
 #include <assert.h>
 
-//struct image {
-//  int32_t fileno;
-//  int32_t start_in_file;
-//  int32_t length;
-//  int32_t imageno;   // used only for cache lookup
-//  int refcount;
-//};
-//
-//struct tile {
-//  struct image *image;
-//
-//  // location in the image
-//  double src_x;
-//  double src_y;
-//};
 struct dicom_wsmis_ops_data {
   //struct _openslide_dicomcache *tc;
   gchar **datafile_paths;
@@ -141,24 +126,13 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                          struct _openslide_level *level,
                          int32_t w, int32_t h,
                          GError **err) {
-#if 0
-  struct dicom_wsmis_ops_data *data = osr->data;
   struct level *l = (struct level *) level;
 
-  dicom *dicom = _openslide_dicomcache_get(data->tc, err);
-  if (dicom == NULL) {
-    return false;
-  }
-
-  bool success = _openslide_grid_paint_region(l->grid, cr, dicom,
-                                              x / l->base.downsample,
-                                              y / l->base.downsample,
-                                              level, w, h,
-                                              err);
-  _openslide_dicomcache_put(data->tc, dicom);
-
-  return success;
-#endif
+  return _openslide_grid_paint_region(l->grid, cr, NULL,
+                                      x / level->downsample,
+                                      y / level->downsample,
+                                      level, w, h,
+                                      err);
 }
 
 static const struct _openslide_ops dicom_wsmis_ops = {
