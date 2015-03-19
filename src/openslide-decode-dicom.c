@@ -44,6 +44,8 @@
  * Implicit -> Explicit conversion. This is technically impossible for WSMIS
  * instances (and thus not handled here).
  * 
+ * Quickhash comes from: (0002,0003) Media Storage SOP Instance UID
+ *
  * Optimisations:
  * It will always parse everything, while some Defined Length Item / Sequence
  * could have been skipped. Since OpenSlide assumes direct file access, this
@@ -884,6 +886,25 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
     }
 }
 
+static const char *trimwhitespace(char *str)
+{
+  char *end;
+  /* Trim leading space */
+  while(*str == ' ') str++;
+
+  if(*str == 0)
+    return str;
+
+  /* Trim trailing space */
+  end = str + strlen(str) - 1;
+  while(end > str && *end == ' ') end--;
+
+  /* Write new null terminator */
+  *(end+1) = 0;
+
+  return str;
+}
+
 static void handle_attribute( /*const*/ dataset * ds, const data_element * de, source * s )
 {
   GSList * list = (GList*)ds->data;
@@ -897,7 +918,7 @@ static void handle_attribute( /*const*/ dataset * ds, const data_element * de, s
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
-    //print_path( ds->cur_tp );
+    print_path( ds->cur_tp );
     size_t len = source_size(s);
     char buf[128];
     assert( len < 127 );
@@ -912,12 +933,26 @@ static void handle_attribute( /*const*/ dataset * ds, const data_element * de, s
       ++p;
       }
     //printf( "%s\n", buf );
-    list = g_slist_append (list, strdup(buf));
+    list = g_slist_append (list, strdup(trimwhitespace(buf)));
     //printf( "%d\n", g_slist_length (list) );
     }
   ds->data = list;
 }
 
+static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, source * s )
+{
+  (void)s;
+  uvr_t u;
+  u.vr = de->vr;
+  assert( de->vr != E_INVALID );
+  print_indent(ds);
+  printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
+  const bool b = find_tag_path( ds->tps, ds->cur_tp );
+  if( b )
+    {
+    print_path( ds->cur_tp );
+    }
+}
 static bool read_dataset( dataset * ds, FILE * stream )
 {
   static const tag_t pixel_data = MAKE_TAG( 0x7fe0,0x0010 );
@@ -985,8 +1020,11 @@ static bool read_dataset2( dataset * ds, FILE * stream )
       {
       if( de.vr != E_SQ )
         {
-        assert( de.vr == E_UN ); // IVRLE !
-        assert(0);
+        assert( is_encapsulated_pixel_data( &de ) );
+        if( de.vr == E_UN ) // IVRLE !
+          {
+          assert(0);
+          }
         }
       process_attribute( ds, &de, stream );
       read_sq_undef(ds, stream);
@@ -1024,7 +1062,6 @@ static bool read_dataset2( dataset * ds, FILE * stream )
 struct _openslide_dicom {
   FILE * stream;
   dataset ds;
-  GSList *filenames;
 };
 
 struct dicom_patient {
@@ -1050,6 +1087,7 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
                                                        GError **err) {
   struct _openslide_dicom *instance = NULL;
   FILE *stream = _openslide_fopen(filename, "rb", err);
+  assert( stream );
 
   // allocate struct
   instance = g_slice_new0(struct _openslide_dicom);
@@ -1065,6 +1103,7 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
 {
   // (0004,1500) CS [CDCAB791\CDCAB791\7A474CCD\CDCAB790 ]         # 36,1-8 Referenced File ID
   // 0004,1220>0004,1500
+  assert( instance->ds.tps->nsets == 0 );
     {
     tag_path *tp = create_tag_path();
     const tag_t t0 = MAKE_TAG(0x0004,0x1220);
@@ -1074,8 +1113,7 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
     destroy_path( tp );
     }
 
-  instance->filenames = NULL;
-  instance->ds.data = instance->filenames;
+  instance->ds.data = NULL;
   instance->ds.handle_attribute = handle_attribute;
   if(  !read_preamble( instance->stream )
     || !read_meta( instance->stream )
@@ -1085,7 +1123,7 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
     return false;
     }
   guint len = g_slist_length (instance->ds.data);
-  printf ("DEBUG: %d\n", len );
+  //printf ("DEBUG: %d\n", len );
   gchar ** datafile_paths = g_new0(char *, len + 1);
   GSList * fn;
   int i = 0;
@@ -1129,11 +1167,44 @@ void _openslide_dicom_destroy(struct _openslide_dicom *instance) {
           (0008,0104) LO [Slide overview lens ]                     # 20,1 Code Meaning 
       (fffe,e0dd)  
 */
-bool _openslide_dicom_level_init(const char *filename,
+bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_level *level,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err)
 {
+  tag_path *tp = create_tag_path();
+    {
+    const tag_t t0 = MAKE_TAG(0x0028,0x0010); // Rows
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+    {
+    const tag_t t0 = MAKE_TAG(0x0028,0x0011); // Columns
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+    {
+    const tag_t t0 = MAKE_TAG(0x0048,0x0006); // Total Pixel Matrix Columns
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+    {
+    const tag_t t0 = MAKE_TAG(0x0048,0x0007); // Total Pixel Matrix Rows
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+  destroy_path( tp );
+
+  instance->ds.data = NULL;
+  instance->ds.handle_attribute = handle_attribute2;
+  if(  !read_preamble( instance->stream )
+    || !read_meta( instance->stream )
+    || !read_dataset2( &instance->ds, instance->stream ) )
+    {
+    assert(0);
+    return false;
+    }
+
   // figure out tile size
   int64_t tw, th;
   tw = 512;

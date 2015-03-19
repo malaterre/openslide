@@ -52,7 +52,7 @@ struct _openslide_dicom_level {
   //uint16_t photometric;
 };
 
-bool _openslide_dicom_level_init(const char *filename,
+bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_level *level,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err);

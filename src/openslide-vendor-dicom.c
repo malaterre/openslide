@@ -239,13 +239,17 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
     // create level
     struct level *l = g_slice_new0(struct level);
     struct _openslide_dicom_level *dicoml = &l->dicoml;
-    if (!_openslide_dicom_level_init(*fullpath,
+
+    struct _openslide_dicom * instance = _openslide_dicom_create(*fullpath, err);
+ 
+    if (!_openslide_dicom_level_init(instance,
                                     (struct _openslide_level *) l,
                                     dicoml,
                                     err)) {
       g_slice_free(struct level, l);
       assert(0);
     }
+    _openslide_dicom_destroy(instance);
     l->grid = _openslide_grid_create_simple(osr,
                                             dicoml->tiles_across,
                                             dicoml->tiles_down,
