@@ -220,13 +220,22 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
   // set ops
   osr->ops = &dicom_wsmis_ops;
 
-  if(!_openslide_dicom_readindex(instance, err))
+  char **datafile_paths = NULL;
+  if(!_openslide_dicom_readindex(instance, dirname, &datafile_paths))
     {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
       "Could not read DICOMDIR");
     return false;
     }
   _openslide_dicom_destroy(instance);
+
+  // accumulate tiled levels
+  char ** fullpath = datafile_paths;
+  while( *fullpath )
+    {
+    printf( "ICI: %s\n", *fullpath );
+    ++fullpath;
+    }
 
   return true;
 }

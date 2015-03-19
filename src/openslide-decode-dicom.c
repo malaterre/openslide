@@ -1129,7 +1129,7 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
   return instance;
 }
 
-bool _openslide_dicom_readindex(struct _openslide_dicom *instance, GError **err)
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, gchar **datafile_paths_out)
 {
   // (0004,1500) CS [CDCAB791\CDCAB791\7A474CCD\CDCAB790 ]         # 36,1-8 Referenced File ID
   // 0004,1220>0004,1500
@@ -1153,16 +1153,20 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, GError **err)
     return false;
     }
   guint len = g_slist_length (instance->ds.data);
-    printf ("DEBUG: %d\n", len );
+  printf ("DEBUG: %d\n", len );
+  gchar ** datafile_paths = g_new0(char *, len + 1);
   GSList * fn;
+  int i = 0;
   for (fn = instance->ds.data; fn != NULL;
     fn = g_slist_next (fn))
     {
-    char *s = (char*)fn->data;
-    //GString * ss = fn->data;
-    printf ("DEBUG: %s\n", s );
+    char *name = (char*)fn->data;
+    datafile_paths[i] = g_build_filename(dirname, name, NULL);
+    ++i;
     }
+  datafile_paths[len] = NULL;
   g_slist_free (instance->ds.data);
+  *datafile_paths_out = datafile_paths;
 
   return true;
 }
