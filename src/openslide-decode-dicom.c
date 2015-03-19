@@ -364,6 +364,12 @@ tag_t pop_tag( tag_path * tp )
   return *ptr;
 }
 
+tag_t last_tag( tag_path * tp )
+{
+  const tag_t * ptr = tp->tags + (tp->ntags - 1);
+  return *ptr;
+}
+
 bool tag_path_equal_to( tag_path * tp1, tag_path * tp2 )
 {
   if( tp1->ntags == tp2->ntags )
@@ -939,18 +945,61 @@ static void handle_attribute( /*const*/ dataset * ds, const data_element * de, s
   ds->data = list;
 }
 
+struct dicom_info {
+  int number_of_frames;
+  int rows;
+  int columns;
+  int total_pixel_mat_cols;
+  int total_pixel_mat_rows;
+  char code_value[16];
+};
+
 static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, source * s )
 {
-  (void)s;
+  struct dicom_info *di = (struct dicom_info*)ds->data;
   uvr_t u;
   u.vr = de->vr;
   assert( de->vr != E_INVALID );
-  print_indent(ds);
-  printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
+  //print_indent(ds);
+  //printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
     print_path( ds->cur_tp );
+    tag_t last = last_tag( ds->cur_tp );
+    char buf[512];
+    size_t len = source_size(s);
+    assert( len < 512 );
+    bool b = source_read( s, buf, len );
+    buf[len] = 0;
+    uint16_t us;
+    uint32_t ul;
+    memcpy( &us, buf, sizeof us );
+    memcpy( &ul, buf, sizeof ul );
+    switch( last )
+      {
+      case MAKE_TAG(0x0028,0x0008):
+        di->number_of_frames = atoi( buf );
+        break;
+      case MAKE_TAG(0x0028,0x0010):
+        di->rows = us;
+        break;
+      case MAKE_TAG(0x0028,0x0011):
+        di->columns = us;
+        break;
+      case MAKE_TAG(0x0048,0x0006):
+        di->total_pixel_mat_cols = ul;
+        break;
+      case MAKE_TAG(0x0048,0x0007):
+        di->total_pixel_mat_rows = ul;
+        break;
+      case MAKE_TAG(0x0008,0x0100):
+        assert( len < 16 );
+        strncpy( di->code_value, buf, len );
+        break;
+      default:
+        assert(0);
+      }
     }
 }
 static bool read_dataset( dataset * ds, FILE * stream )
@@ -1174,28 +1223,49 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
 {
   tag_path *tp = create_tag_path();
     {
+    const tag_t t0 = MAKE_TAG(0x0028,0x0008); // Number of Frames
+    clear_path( tp );
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+    {
     const tag_t t0 = MAKE_TAG(0x0028,0x0010); // Rows
+    clear_path( tp );
     push_tag( tp, t0 );
     add_tag_path( instance->ds.tps, tp );
     }
     {
     const tag_t t0 = MAKE_TAG(0x0028,0x0011); // Columns
+    clear_path( tp );
     push_tag( tp, t0 );
     add_tag_path( instance->ds.tps, tp );
     }
     {
     const tag_t t0 = MAKE_TAG(0x0048,0x0006); // Total Pixel Matrix Columns
+    clear_path( tp );
     push_tag( tp, t0 );
     add_tag_path( instance->ds.tps, tp );
     }
     {
     const tag_t t0 = MAKE_TAG(0x0048,0x0007); // Total Pixel Matrix Rows
+    clear_path( tp );
     push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
+    {
+    const tag_t t0 = MAKE_TAG(0x0048,0x0105); // Optical Path
+    const tag_t t1 = MAKE_TAG(0x0022,0x0019); // Lenses Code Sequence
+    const tag_t t2 = MAKE_TAG(0x0008,0x0100); // Code Value
+    clear_path( tp );
+    push_tag(
+      push_tag(
+        push_tag( tp, t0 ), t1 ), t2 );
     add_tag_path( instance->ds.tps, tp );
     }
   destroy_path( tp );
 
-  instance->ds.data = NULL;
+  struct dicom_info di;
+  instance->ds.data = &di;
   instance->ds.handle_attribute = handle_attribute2;
   if(  !read_preamble( instance->stream )
     || !read_meta( instance->stream )
@@ -1207,13 +1277,13 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
 
   // figure out tile size
   int64_t tw, th;
-  tw = 512;
-  th = 512;
-//  GET_FIELD_OR_FAIL(tiff, TIFFTAG_TILEWIDTH, uint32_t, tw);
-//  GET_FIELD_OR_FAIL(tiff, TIFFTAG_TILELENGTH, uint32_t, th);
+  tw = di.rows;
+  th = di.columns;
 
   // get image size
   int64_t iw, ih;
+  iw = di.total_pixel_mat_cols;
+  ih = di.total_pixel_mat_rows;
 
   // safe now, start writing
   if (level) {
