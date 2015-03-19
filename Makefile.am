@@ -26,6 +26,7 @@ src_libopenslide_la_SOURCES = \
 	src/openslide-decode-sqlite.c \
 	src/openslide-decode-tiff.c \
 	src/openslide-decode-tifflike.c \
+	src/openslide-decode-dicom.c \
 	src/openslide-decode-xml.c \
 	src/openslide-error.c \
 	src/openslide-grid.c \

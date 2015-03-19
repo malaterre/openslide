@@ -20,37 +20,36 @@
  */
 
 /*
- * DICOM support
+ * DICOM support for VL Whole Slide Microscopy Image Storage (1.2.840.10008.5.1.4.1.1.77.1.6)
  *
- * quickhash comes from Instance UID
+ * quickhash comes from (0008,0018) SOP Instance UID
  *
  */
 
 #include <config.h>
 
 #include "openslide-private.h"
-#include "openslide-decode-tiff.h"
-#include "openslide-decode-tifflike.h"
 
 #include <glib.h>
 #include <string.h>
 #include <stdlib.h>
-#include <tiffio.h>
+#include <assert.h>
 
-struct dicom_wsi_ops_data {
+struct dicom_wsmis_ops_data {
   struct _openslide_dicomcache *tc;
 };
 
 struct level {
   struct _openslide_level base;
-  struct _openslide_dicom_level dicoml;
+//  struct _openslide_dicom_level dicoml;
   struct _openslide_grid *grid;
 };
 
 static void destroy(openslide_t *osr) {
-  struct dicom_wsi_ops_data *data = osr->data;
+#if 0
+  struct dicom_wsmis_ops_data *data = osr->data;
   _openslide_dicomcache_destroy(data->tc);
-  g_slice_free(struct dicom_wsi_ops_data, data);
+  g_slice_free(struct dicom_wsmis_ops_data, data);
 
   for (int32_t i = 0; i < osr->level_count; i++) {
     struct level *l = (struct level *) osr->levels[i];
@@ -58,6 +57,7 @@ static void destroy(openslide_t *osr) {
     g_slice_free(struct level, l);
   }
   g_free(osr->levels);
+#endif
 }
 
 static bool read_tile(openslide_t *osr,
@@ -66,6 +66,7 @@ static bool read_tile(openslide_t *osr,
                       int64_t tile_col, int64_t tile_row,
                       void *arg,
                       GError **err) {
+#if 0
   struct level *l = (struct level *) level;
   struct _openslide_dicom_level *dicoml = &l->dicoml;
   dicom *dicom = arg;
@@ -113,6 +114,7 @@ static bool read_tile(openslide_t *osr,
 
   // done with the cache entry, release it
   _openslide_cache_entry_unref(cache_entry);
+#endif
 
   return true;
 }
@@ -122,7 +124,8 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                          struct _openslide_level *level,
                          int32_t w, int32_t h,
                          GError **err) {
-  struct dicom_wsi_ops_data *data = osr->data;
+#if 0
+  struct dicom_wsmis_ops_data *data = osr->data;
   struct level *l = (struct level *) level;
 
   dicom *dicom = _openslide_dicomcache_get(data->tc, err);
@@ -138,51 +141,83 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
   _openslide_dicomcache_put(data->tc, dicom);
 
   return success;
+#endif
 }
 
-static const struct _openslide_ops dicom_wsi_ops = {
+static const struct _openslide_ops dicom_wsmis_ops = {
   .paint_region = paint_region,
   .destroy = destroy,
 };
 
-static bool dicom_wsi_detect(const char *filename G_GNUC_UNUSED,
-                                struct _openslide_dicomlike *tl,
+bool _openslide_dicom_is_wsmis(struct _openslide_dicom_wsmis *tl,
+                                  int64_t dir) {
+  return true;
+}
+
+static bool dicom_wsmis_detect(const char *filename,
+                                struct _openslide_tifflike *tl,
                                 GError **err) {
-  // ensure we have a dicom
-  if (!tl) {
+  // reject TIFFs
+  if (tl) {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "Not a dicom file");
+                "Is a TIFF file");
     return false;
   }
 
-  // ensure dicom is tiled
-  if (!_openslide_dicomlike_is_tiled(tl, 0)) {
+  // verify filename
+  if (!g_str_has_suffix(filename, "DICOMDIR")) {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "dicom is not tiled");
+                "File does not have %s extension", "DICOMDIR");
     return false;
   }
+
+  // verify existence
+  if (!g_file_test(filename, G_FILE_TEST_EXISTS)) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "File does not exist");
+    return false;
+  }
+
+  // ensure DICOM is wsmis
+//  if (!_openslide_dicom_is_wsmis(tl, 0)) {
+//    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+//                "DICOM is not wsmis");
+//    return false;
+//  }
 
   return true;
 }
 
-static int width_compare(gconstpointer a, gconstpointer b) {
-  const struct level *la = *(const struct level **) a;
-  const struct level *lb = *(const struct level **) b;
+struct dicom_patient {
+  struct dicom_patient * next;
+  struct dicom_study * study;
+};
 
-  if (la->dicoml.image_w > lb->dicoml.image_w) {
-    return -1;
-  } else if (la->dicoml.image_w == lb->dicoml.image_w) {
-    return 0;
-  } else {
-    return 1;
-  }
-}
+struct dicom_study {
+  struct dicom_study * next;
+  struct dicom_series * series;
+};
 
-static bool dicom_wsi_open(openslide_t *osr,
+struct dicom_series {
+  struct dicom_series * next;
+  struct dicom_image * image;
+};
+
+struct dicom_image {
+  struct dicom_image * next;
+};
+
+static bool dicom_wsmis_open(openslide_t *osr,
                               const char *filename,
                               struct _openslide_dicomlike *tl,
                               struct _openslide_hash *quickhash1,
                               GError **err) {
+  char *dirname = NULL;
+  // get directory from filename
+  dirname = g_strndup(filename, strlen(filename) - strlen("DICOMDIR"));
+assert(0);
+
+#if 0
   GPtrArray *level_array = g_ptr_array_new();
 
   // open dicom
@@ -265,8 +300,8 @@ static bool dicom_wsi_open(openslide_t *osr,
   level_array = NULL;
 
   // allocate private data
-  struct dicom_wsi_ops_data *data =
-    g_slice_new0(struct dicom_wsi_ops_data);
+  struct dicom_wsmis_ops_data *data =
+    g_slice_new0(struct dicom_wsmis_ops_data);
 
   // store osr data
   g_assert(osr->data == NULL);
@@ -274,7 +309,7 @@ static bool dicom_wsi_open(openslide_t *osr,
   osr->levels = (struct _openslide_level **) levels;
   osr->level_count = level_count;
   osr->data = data;
-  osr->ops = &dicom_wsi_ops;
+  osr->ops = &dicom_wsmis_ops;
 
   // put dicom handle and store dicomcache reference
   _openslide_dicomcache_put(tc, dicom);
@@ -295,12 +330,13 @@ static bool dicom_wsi_open(openslide_t *osr,
   // free dicom
   _openslide_dicomcache_put(tc, dicom);
   _openslide_dicomcache_destroy(tc);
+#endif
   return false;
 }
 
-const struct _openslide_format _openslide_format_dicom_wsi = {
-  .name = "dicom-wsi",
-  .vendor = "dicom-wsi",
-  .detect = dicom_detect,
-  .open = dicom_open,
+const struct _openslide_format _openslide_format_dicom_wsmis = {
+  .name = "dicom-wsmis",
+  .vendor = "dicom-wsmis",
+  .detect = dicom_wsmis_detect,
+  .open = dicom_wsmis_open,
 };
