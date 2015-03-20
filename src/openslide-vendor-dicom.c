@@ -68,10 +68,12 @@ static bool read_tile(openslide_t *osr,
                       int64_t tile_col, int64_t tile_row,
                       void *arg,
                       GError **err) {
-#if 0
   struct level *l = (struct level *) level;
-  struct _openslide_dicom_level *dicoml = &l->dicoml;
-  dicom *dicom = arg;
+  //struct tile * tile = arg;
+  struct dicom_wsmis_ops_data *data = arg; // see _openslide_grid_paint_region call (below)
+  bool success = true;
+  assert(0);
+#if 0
 
   // tile size
   int64_t tw = dicoml->tile_w;
@@ -126,9 +128,10 @@ static bool paint_region(openslide_t *osr, cairo_t *cr,
                          struct _openslide_level *level,
                          int32_t w, int32_t h,
                          GError **err) {
+  struct dicom_wsmis_ops_data *data = osr->data;
   struct level *l = (struct level *) level;
 
-  return _openslide_grid_paint_region(l->grid, cr, NULL,
+  return _openslide_grid_paint_region(l->grid, cr, data,
                                       x / level->downsample,
                                       y / level->downsample,
                                       level, w, h,
@@ -201,12 +204,6 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
 
   struct _openslide_dicom * instance = _openslide_dicom_create(filename, err);
 
-  struct dicom_wsmis_ops_data *data = g_slice_new0(struct dicom_wsmis_ops_data);
-  osr->data = data;
-
-  // set ops
-  osr->ops = &dicom_wsmis_ops;
-
   char **datafile_paths = NULL;
   if(!_openslide_dicom_readindex(instance, dirname, &datafile_paths))
     {
@@ -263,7 +260,14 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
   level_array = NULL;
 
   // store osr data
-  //g_assert(osr->data == NULL);
+  g_assert(osr->data == NULL);
+  struct dicom_wsmis_ops_data *data = g_slice_new0(struct dicom_wsmis_ops_data);
+  data->datafile_paths = datafile_paths;
+  osr->data = data;
+
+  // set ops
+  osr->ops = &dicom_wsmis_ops;
+
   g_assert(osr->levels == NULL);
   osr->levels = (struct _openslide_level **) levels;
   osr->level_count = level_count;

@@ -895,17 +895,14 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
 static const char *trimwhitespace(char *str)
 {
   char *end;
-  /* Trim leading space */
   while(*str == ' ') str++;
 
   if(*str == 0)
     return str;
 
-  /* Trim trailing space */
   end = str + strlen(str) - 1;
   while(end > str && *end == ' ') end--;
 
-  /* Write new null terminator */
   *(end+1) = 0;
 
   return str;
@@ -914,10 +911,8 @@ static const char *trimwhitespace(char *str)
 static void handle_attribute( /*const*/ dataset * ds, const data_element * de, source * s )
 {
   GSList * list = (GList*)ds->data;
-  (void)ds;
-  (void)s;
-  uvr_t u;
-  u.vr = de->vr;
+  //uvr_t u;
+  //u.vr = de->vr;
   assert( de->vr != E_INVALID );
   //print_indent(ds);
   //printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
