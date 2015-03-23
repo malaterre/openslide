@@ -81,8 +81,10 @@ static bool read_tile(openslide_t *osr,
                                             &cache_entry);
   if (!tiledata) {
     tiledata = g_slice_alloc(tw * th * 4);
+    struct tile * tiles = dicoml->tiles;
+    const int tidx = tile_col * dicoml->tiles_across + tile_row;
     if (!_openslide_jpeg_read(data->datafile_paths[dicoml->fileno],
-                                  dicoml->tiles->start_in_file /* FIMXE */,
+                                  tiles[tidx].start_in_file,
                                   tiledata, tw, th,
                                   err)) {
       g_slice_free1(tw * th * 4, tiledata);
