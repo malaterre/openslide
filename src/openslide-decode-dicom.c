@@ -124,6 +124,7 @@ static inline uint16_t get_element( tag_t tag )
 #define SWAP_VL16(vl) vl = bswap_16(vl)
 #endif
 
+// Full list of VRs as of DICOM 2015a
 enum {
   E_INVALID = 0, /* Item, Item Delimitation Item & Sequence Delimitation Item */
   E_AE = MAKE_VR('A','E'),
@@ -211,34 +212,34 @@ typedef struct
   tag_t tag;
   vr_t vr;
   vl_t vl;
-} data_element;
+} dataelement;
 
-static inline bool tag_equal_to( const data_element * de, tag_t tag )
+static inline bool tag_equal_to( const dataelement * de, tag_t tag )
 {
   return de->tag == tag;
 }
 
-static inline bool tag_is_lower( const data_element * de, tag_t tag )
+static inline bool tag_is_lower( const dataelement * de, tag_t tag )
 {
   return de->tag < tag;
 }
 
-static inline bool is_start( const data_element * de )
+static inline bool is_start( const dataelement * de )
 {
   static const tag_t start = MAKE_TAG( 0xfffe,0xe000 );
   return de->tag == start;
 }
-static inline bool is_end_item( const data_element * de )
+static inline bool is_end_item( const dataelement * de )
 {
   static const tag_t end_item = MAKE_TAG( 0xfffe,0xe00d );
   return de->tag == end_item;
 }
-static inline bool is_end_sq( const data_element * de )
+static inline bool is_end_sq( const dataelement * de )
 {
   static const tag_t end_sq = MAKE_TAG( 0xfffe,0xe0dd );
   return de->tag == end_sq;
 }
-static inline bool is_encapsulated_pixel_data( const data_element * de )
+static inline bool is_encapsulated_pixel_data( const dataelement * de )
 {
   static const tag_t pixel_data = MAKE_TAG( 0x7fe0,0x0010 );
   const bool is_pixel_data = tag_equal_to(de, pixel_data);
@@ -250,13 +251,13 @@ static inline bool is_encapsulated_pixel_data( const data_element * de )
     }
   return false;
 }
-static inline bool is_undef_len( const data_element * de )
+static inline bool is_undef_len( const dataelement * de )
 {
   const bool b = de->vl == (uint32_t)-1;
   if( b ) assert( de->vr == E_SQ || is_encapsulated_pixel_data( de ) || is_start(de) );
   return b;
 }
-static inline uint32_t compute_len( const data_element * de )
+static inline uint32_t compute_len( const dataelement * de )
 {
   assert( !is_undef_len( de ) );
   if( isvr32( de->vr ) )
@@ -265,7 +266,7 @@ static inline uint32_t compute_len( const data_element * de )
     }
   return 4 /* tag */ + 4 /* VR/VL */ + de->vl /* VL */;
 }
-static inline uint32_t compute_undef_len( const data_element * de, uint32_t len )
+static inline uint32_t compute_undef_len( const dataelement * de, uint32_t len )
 {
   assert( is_undef_len( de ) );
   assert( len != (uint32_t)-1 );
@@ -413,7 +414,7 @@ struct dataset {
 };
 
 // explicit
-static bool read_explicit( data_element * de, FILE * stream )
+static bool read_explicit( dataelement * de, FILE * stream )
 {
   utag_t t;
   uvr_t vr;
@@ -457,7 +458,7 @@ static bool read_explicit( data_element * de, FILE * stream )
   return true;
 }
 
-static bool read_explicit_undef( data_element * de, FILE * stream )
+static bool read_explicit_undef( dataelement * de, FILE * stream )
 {
   utag_t t;
   uvr_t vr;
@@ -512,7 +513,7 @@ static bool read_explicit_undef( data_element * de, FILE * stream )
 }
 
 // implicit
-static bool read_implicit( data_element * de, FILE * stream )
+static bool read_implicit( dataelement * de, FILE * stream )
 {
   utag_t t;
   uvl_t vl;
@@ -544,7 +545,7 @@ static inline bool read_ul( FILE * stream, uint32_t * value )
 // read header
 static bool read_meta( FILE * stream )
 {
-  data_element de = { 0 /* tag */ };
+  dataelement de = { 0 /* tag */ };
   if( !read_explicit( &de, stream ) ) return false;
   if( de.tag != MAKE_TAG(0x2,0x0)
     || de.vr != E_UL
@@ -557,7 +558,7 @@ static bool read_meta( FILE * stream )
   return ret == 0;
 }
 
-static void process_attribute( dataset *ds, data_element *de, FILE * stream )
+static void process_attribute( dataset *ds, dataelement *de, FILE * stream )
 {
   assert( !is_start(de) && !is_end_item(de) && !is_end_sq(de) );
   if( is_undef_len(de) )
@@ -576,7 +577,7 @@ static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream );
 /* read a single undefined length Item */
 static uint32_t read_item_undef( dataset * ds, FILE * stream )
 {
-  data_element de = { 0 /* tag */ };
+  dataelement de = { 0 /* tag */ };
   uint32_t itemlen = 0;
   do
     {
@@ -622,7 +623,7 @@ static uint32_t read_item_undef( dataset * ds, FILE * stream )
 static void read_item_def( dataset * ds, FILE * stream, const uint32_t itemlen )
 {
   uint32_t curlen = 0;
-  data_element de = { 0 /* tag */ };
+  dataelement de = { 0 /* tag */ };
   while( curlen != itemlen )
     {
     assert( curlen <= itemlen );
@@ -658,7 +659,7 @@ static void read_item_def( dataset * ds, FILE * stream, const uint32_t itemlen )
 /* return the actual length of the sequence */
 static uint32_t read_sq_undef( dataset * ds, FILE * stream )
 {
-  data_element de;
+  dataelement de;
   uint32_t seqlen = 0;
   do
     {
@@ -697,7 +698,7 @@ static uint32_t read_sq_undef( dataset * ds, FILE * stream )
 /* Encapsulated Pixel Data (one JPEG stream per Item) */
 static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
 {
-  data_element de;
+  dataelement de;
   uint32_t epdlen = 0;
   do
     {
@@ -726,7 +727,7 @@ static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
 static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
 {
   uint32_t curlen = 0;
-  data_element de;
+  dataelement de;
   while( curlen != seqlen )
     {
     // illegal:
@@ -753,7 +754,7 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
 // Main loop
 static bool read_dataset( dataset * ds, FILE * stream )
 {
-  data_element de = { 0 /* tag */ };
+  dataelement de = { 0 /* tag */ };
   while( read_explicit( &de, stream ) )
     {
     assert( get_group( de.tag ) != 0xfffe );
