@@ -464,24 +464,6 @@ bool find_tag_path( tag_path_set *tps, tag_path *tp )
   return false;
 }
 
-bool match_tag_path( tag_path_set *tps, tag_path *tp )
-{
-  int s;
-  int total = 0;
-  tag_path ref;
-  for( s = 0; s < tps->nsets; ++s )
-    {
-    tag_t * ptr = tps->tags + total;
-    ref.tags = ptr;
-    ref.ntags = ref.size = tps->ntags[s];
-    
-    const bool b = tag_path_match( &ref, tp );
-    if( b ) return true;
-    total += tps->ntags[s];
-    }
-  return false;
-}
-
 void add_tag_path( tag_path_set *tps, tag_path *tp )
 {
   int s;
@@ -808,17 +790,7 @@ static uint32_t read_sq_undef( dataset * ds, FILE * stream )
     else
       {
       seqlen += 4 /* tag */ + 4 /* vl */ + de.vl;
-      tag_path * tp = get_tag_path( ds );
-      const bool b = match_tag_path( ds->tps, tp );
-      if( !b )
-        {
-        // skip over an entire Item
-        fseeko(stream, de.vl, SEEK_CUR );
-        }
-      else
-        {
-        read_item_def( ds, stream, de.vl );
-        }
+      read_item_def( ds, stream, de.vl );
       }
     } while( 1 );
 
@@ -879,17 +851,7 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
     else
       {
       curlen += 4 /* tag */ + 4 /* VL */ + de.vl;
-      tag_path * tp = get_tag_path( ds );
-      const bool b = match_tag_path( ds->tps, tp );
-      if( !b )
-        {
-        // skip over an entire Item
-        fseeko(stream, de.vl, SEEK_CUR );
-        }
-      else
-        {
-        read_item_def( ds, stream, de.vl );
-        }
+      read_item_def( ds, stream, de.vl );
       }
     }
 }
@@ -1061,18 +1023,7 @@ static bool read_dataset( dataset * ds, FILE * stream )
       {
       if( de.vr == E_SQ )
         {
-        tag_path * tp = get_tag_path( ds );
-        const bool b = match_tag_path( ds->tps, tp );
-        if( !b )
-          {
-          // skip over an entire SQ
-          assert( de.vr == E_SQ );
-          fseeko(stream, de.vl, SEEK_CUR );
-          }
-        else
-          {
-          read_sq_def( ds, stream, de.vl );
-          }
+        read_sq_def( ds, stream, de.vl );
         }
       else
         {
