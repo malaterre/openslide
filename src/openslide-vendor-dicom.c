@@ -30,21 +30,23 @@
 
 #include "openslide-private.h"
 #include "openslide-decode-dicom.h"
+#include "openslide-decode-jpeg.h"
+#include "openslide-decode-tiff.h" // _openslide_tiff_clip_tile
 
 #include <glib.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 
-struct dicom_wsmis_ops_data {
-  //struct _openslide_dicomcache *tc;
-  gchar **datafile_paths;
-};
-
 struct level {
   struct _openslide_level base;
   struct _openslide_dicom_level dicoml;
   struct _openslide_grid *grid;
+};
+
+struct dicom_wsmis_ops_data {
+  //struct _openslide_dicomcache *tc;
+  gchar **datafile_paths;
 };
 
 static void destroy(openslide_t *osr) {
@@ -69,11 +71,8 @@ static bool read_tile(openslide_t *osr,
                       void *arg,
                       GError **err) {
   struct level *l = (struct level *) level;
-  //struct tile * tile = arg;
+  struct _openslide_dicom_level *dicoml = &l->dicoml;
   struct dicom_wsmis_ops_data *data = arg; // see _openslide_grid_paint_region call (below)
-  bool success = true;
-  assert(0);
-#if 0
 
   // tile size
   int64_t tw = dicoml->tile_w;
@@ -86,15 +85,16 @@ static bool read_tile(openslide_t *osr,
                                             &cache_entry);
   if (!tiledata) {
     tiledata = g_slice_alloc(tw * th * 4);
-    if (!_openslide_dicom_read_tile(dicoml, dicom,
-                                   tiledata, tile_col, tile_row,
-                                   err)) {
+    if (!_openslide_jpeg_read(data->datafile_paths[dicoml->fileno],
+                                  dicoml->tiles->start_in_file /* FIMXE */,
+                                  tiledata, tw, th,
+                                  err)) {
       g_slice_free1(tw * th * 4, tiledata);
       return false;
     }
 
     // clip, if necessary
-    if (!_openslide_dicom_clip_tile(dicoml, tiledata,
+    if (!_openslide_tiff_clip_tile(dicoml, tiledata,
                                    tile_col, tile_row,
                                    err)) {
       g_slice_free1(tw * th * 4, tiledata);
@@ -118,7 +118,6 @@ static bool read_tile(openslide_t *osr,
 
   // done with the cache entry, release it
   _openslide_cache_entry_unref(cache_entry);
-#endif
 
   return true;
 }
@@ -142,11 +141,6 @@ static const struct _openslide_ops dicom_wsmis_ops = {
   .paint_region = paint_region,
   .destroy = destroy,
 };
-
-bool _openslide_dicom_is_wsmis(struct _openslide_dicom_wsmis *tl,
-                                  int64_t dir) {
-  return true;
-}
 
 static bool dicom_wsmis_detect(const char *filename,
                                 struct _openslide_tifflike *tl,
@@ -218,8 +212,6 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
   GPtrArray *level_array = g_ptr_array_new();
   while( *fullpath )
     {
-    printf( "ICI: %s\n", *fullpath );
-
     // create level
     struct level *l = g_slice_new0(struct level);
     struct _openslide_dicom_level *dicoml = &l->dicoml;
@@ -231,7 +223,6 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                                     dicoml,
                                     err)) {
       g_slice_free(struct level, l);
-      assert(0);
     }
     _openslide_dicom_destroy(instance);
     l->grid = _openslide_grid_create_simple(osr,
@@ -241,23 +232,27 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                                             dicoml->tile_h,
                                             read_tile);
 
+    const int index = fullpath - datafile_paths;
+    dicoml->fileno = index;
     // add to array
     if( !dicoml->is_icon )
-    g_ptr_array_add(level_array, l);
+      g_ptr_array_add(level_array, l);
 
     ++fullpath;
     }
   // sort tiled levels
   g_ptr_array_sort(level_array, width_compare);
 
-  // FIXME:
-  _openslide_hash_string(quickhash1, "1.2.826.0.1.3244452.1.0.52857.974040379.376499.438437.556598.585" );
-
   // unwrap level array
   int32_t level_count = level_array->len;
   struct level **levels =
     (struct level **) g_ptr_array_free(level_array, false);
   level_array = NULL;
+
+  // Use Study Instance UID for hash:
+  struct level *first = levels[0];
+  struct _openslide_dicom_level *dicoml = &first->dicoml;
+  _openslide_hash_string(quickhash1, dicoml->hash);
 
   // store osr data
   g_assert(osr->data == NULL);

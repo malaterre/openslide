@@ -506,6 +506,7 @@ struct dataset {
   tag_path *cur_tp;
   tag_path_set *tps;
   void (*handle_attribute)(/*const*/ dataset * ds, const data_element * de, source * value);
+  void (*handle_pixel_data_item)(/*const*/ dataset * ds, int64_t pos, uint32_t len);
   void *data;
 };
 
@@ -837,13 +838,14 @@ static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
     /* restart for each Item */
     de.tag = 0;
     /* Item start */
-    const bool b= read_implicit(&de, stream);
+    const bool b = read_implicit(&de, stream);
     assert( b );
     /* end of SQ */
     epdlen += 4 /* tag */ + 4 /* vl */;
     if( is_end_sq(&de) ) break;
     assert( is_start(&de) );
 
+    if( ds->handle_pixel_data_item )  (ds->handle_pixel_data_item)( ds, ftello(stream), de.vl );
     fseeko(stream, de.vl, SEEK_CUR );
     epdlen += de.vl;
     } while( 1 );
@@ -908,7 +910,7 @@ static const char *trimwhitespace(char *str)
   return str;
 }
 
-static void handle_attribute( /*const*/ dataset * ds, const data_element * de, source * s )
+static void handle_attribute1( /*const*/ dataset * ds, const data_element * de, source * s )
 {
   GSList * list = (GList*)ds->data;
   //uvr_t u;
@@ -947,6 +949,10 @@ struct dicom_info {
   int total_pixel_mat_cols;
   int total_pixel_mat_rows;
   char code_value[16];
+  char study_instance_uid[64];
+  int study_instance_uid_len;
+  struct tile *tiles;
+  int current_tile_num;
 };
 
 static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, source * s )
@@ -973,6 +979,15 @@ static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, 
     memcpy( &ul, buf, sizeof ul );
     switch( last )
       {
+      case MAKE_TAG(0x0008,0x0100):
+        assert( len < 16 );
+        strncpy( di->code_value, buf, len + 1 );
+        break;
+      case MAKE_TAG(0x0020,0x000d):
+        assert( len <= 64 );
+        strncpy( di->study_instance_uid, buf, len );
+        di->study_instance_uid_len = len;
+        break;
       case MAKE_TAG(0x0028,0x0008):
         di->number_of_frames = atoi( buf );
         break;
@@ -988,72 +1003,33 @@ static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, 
       case MAKE_TAG(0x0048,0x0007):
         di->total_pixel_mat_rows = ul;
         break;
-      case MAKE_TAG(0x0008,0x0100):
-        assert( len < 16 );
-        strncpy( di->code_value, buf, len + 1 );
-        break;
       default:
         assert(0);
       }
     }
 }
 
-static bool read_dataset( dataset * ds, FILE * stream )
+static void handle_pdi( /*const*/ dataset * ds, int64_t pos, uint32_t len )
 {
-  static const tag_t pixel_data = MAKE_TAG( 0x7fe0,0x0010 );
-  data_element de = { 0 /* tag */ };
-  while( read_explicit( &de, stream ) && tag_is_lower( &de, pixel_data ) )
+  struct dicom_info *di = (struct dicom_info*)ds->data;
+  struct tile * tiles = NULL;
+  if( di->tiles == NULL )
     {
-    assert( get_group( de.tag ) != 0xfffe );
-    assert( get_group( de.tag ) <= 0x7fe0 );
-    push_tag( ds->cur_tp, de.tag );
-    if( is_undef_len(&de) )
-      {
-      if( de.vr != E_SQ )
-        {
-        assert( de.vr == E_UN ); // IVRLE !
-        assert(0);
-        }
-      process_attribute( ds, &de, stream );
-      read_sq_undef(ds, stream);
-      }
-    else
-      {
-      // FIXME: technically a Sequence could be stored with VR:UN, this does
-      // not make sense in the WSI world, thus it is not handled.
-      if( de.vr == E_SQ )
-        {
-        tag_path * tp = get_tag_path( ds );
-        const bool b = match_tag_path( ds->tps, tp );
-        if( !b )
-          {
-          // skip over an entire SQ
-          assert( de.vr == E_SQ );
-          fseeko(stream, de.vl, SEEK_CUR );
-          }
-        else
-          {
-          read_sq_def( ds, stream, de.vl );
-          }
-        }
-      else
-        {
-        process_attribute( ds, &de, stream );
-        }
-      }
-    pop_tag( ds->cur_tp );
+    assert( di->number_of_frames > 0 );
+    di->tiles = malloc( di->number_of_frames * sizeof( struct tile ) );
+    di->current_tile_num = 0;
+    // discard Basic Offset Table for now
+    return;
     }
-  if( !feof( stream ) )
-    {
-    //assert( is_encapsulated_pixel_data(&de) );
-    assert( de.vr == E_OB || de.vr == E_OW );
-    assert( is_undef_len(&de) || !is_undef_len(&de) );
-    return true;
-    }
-  return false;
+  tiles = di->tiles;
+  assert( tiles );
+  assert( di->current_tile_num < di->number_of_frames );
+  tiles[ di->current_tile_num ].start_in_file = pos;
+  tiles[ di->current_tile_num ].length = len;
+  di->current_tile_num++;
 }
 
-static bool read_dataset2( dataset * ds, FILE * stream )
+static bool read_dataset( dataset * ds, FILE * stream )
 {
   data_element de = { 0 /* tag */ };
   while( read_explicit( &de, stream ) )
@@ -1063,21 +1039,26 @@ static bool read_dataset2( dataset * ds, FILE * stream )
     push_tag( ds->cur_tp, de.tag );
     if( is_undef_len(&de) )
       {
+      process_attribute( ds, &de, stream );
       if( de.vr != E_SQ )
         {
         assert( is_encapsulated_pixel_data( &de ) );
         if( de.vr == E_UN ) // IVRLE !
           {
+          // FIXME: technically a Sequence could be stored with VR:UN, this does
+          // not make sense in the WSI world, thus it is not handled.
           assert(0);
           }
+        const uint32_t epdlen = read_encapsulated_pixel_data( ds, stream );
         }
-      process_attribute( ds, &de, stream );
-      read_sq_undef(ds, stream);
+      else
+        {
+        assert( de.vr == E_SQ );
+        read_sq_undef(ds, stream);
+        }
       }
     else
       {
-      // FIXME: technically a Sequence could be stored with VR:UN, this does
-      // not make sense in the WSI world, thus it is not handled.
       if( de.vr == E_SQ )
         {
         tag_path * tp = get_tag_path( ds );
@@ -1107,25 +1088,6 @@ static bool read_dataset2( dataset * ds, FILE * stream )
 struct _openslide_dicom {
   FILE * stream;
   dataset ds;
-};
-
-struct dicom_patient {
-  struct dicom_patient * next;
-  struct dicom_study * study;
-};
-
-struct dicom_study {
-  struct dicom_study * next;
-  struct dicom_series * series;
-};
-
-struct dicom_series {
-  struct dicom_series * next;
-  struct dicom_image * image;
-};
-
-struct dicom_image {
-  struct dicom_image * next;
 };
 
 struct _openslide_dicom *_openslide_dicom_create(const char *filename,
@@ -1159,16 +1121,16 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
     }
 
   instance->ds.data = NULL;
-  instance->ds.handle_attribute = handle_attribute;
+  instance->ds.handle_attribute = handle_attribute1;
+  instance->ds.handle_pixel_data_item = NULL;
   if(  !read_preamble( instance->stream )
     || !read_meta( instance->stream )
-    || !read_dataset2( &instance->ds, instance->stream ) )
+    || !read_dataset( &instance->ds, instance->stream ) )
     {
     assert(0);
     return false;
     }
   guint len = g_slist_length (instance->ds.data);
-  //printf ("DEBUG: %d\n", len );
   gchar ** datafile_paths = g_new0(char *, len + 1);
   GSList * fn;
   int i = 0;
@@ -1199,25 +1161,18 @@ void _openslide_dicom_destroy(struct _openslide_dicom *instance) {
   g_slice_free(struct _openslide_dicom, instance);
 }
 
-
-/*
-(0048,0105) SQ (Sequence with undefined length)                   # u/l,1 Optical Path
-    (fffe,e000) na (Item with undefined length) 
-      (0022,0016) SQ (Sequence with undefined length)               # u/l,1 Illumination
-      (fffe,e0dd)                                                                       
-      (0022,0019) SQ (Sequence with undefined length)               # u/l,1 Lenses Code 
-        (fffe,e000) na (Item with defined length)                                       
-          (0008,0100) SH [A-00118 ]                                 # 8,1 Code Value    
-          (0008,0102) SH [SRT ]                                     # 4,1 Coding Scheme 
-          (0008,0104) LO [Slide overview lens ]                     # 20,1 Code Meaning 
-      (fffe,e0dd)  
-*/
 bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_level *level,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err)
 {
   tag_path *tp = create_tag_path();
+    {
+    const tag_t t0 = MAKE_TAG(0x0020,0x000d); // Study Instance UID
+    clear_path( tp );
+    push_tag( tp, t0 );
+    add_tag_path( instance->ds.tps, tp );
+    }
     {
     const tag_t t0 = MAKE_TAG(0x0028,0x0008); // Number of Frames
     clear_path( tp );
@@ -1261,11 +1216,13 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
   destroy_path( tp );
 
   struct dicom_info di;
+  di.tiles = NULL;
   instance->ds.data = &di;
   instance->ds.handle_attribute = handle_attribute2;
+  instance->ds.handle_pixel_data_item = handle_pdi;
   if(  !read_preamble( instance->stream )
     || !read_meta( instance->stream )
-    || !read_dataset2( &instance->ds, instance->stream ) )
+    || !read_dataset( &instance->ds, instance->stream ) )
     {
     assert(0);
     return false;
@@ -1300,6 +1257,7 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
     // num tiles in each dimension
     dicoml->tiles_across = (iw / tw) + !!(iw % tw);   // integer ceiling
     dicoml->tiles_down = (ih / th) + !!(ih % th);
+    assert( dicoml->tiles_across * dicoml->tiles_down == di.number_of_frames );
 
     //tiffl->tile_read_direct = read_direct;
     //tiffl->photometric = photometric;
@@ -1308,9 +1266,11 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
       {
       dicoml->is_icon = true;
       }
-
+    strncpy(dicoml->hash, di.study_instance_uid, di.study_instance_uid_len );
+    dicoml->hash[di.study_instance_uid_len] = 0;
+    dicoml->image_format = FORMAT_JPEG;
+    dicoml->tiles = di.tiles;
   }
 
   return true;
-
 }

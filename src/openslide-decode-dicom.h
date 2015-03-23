@@ -42,6 +42,16 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
 // helpful printout?
 //void _openslide_dicomdir_print(struct _openslide_dicom *d);
 
+enum image_format {
+  FORMAT_UNKNOWN,
+  FORMAT_JPEG,
+};
+
+struct tile {
+  int64_t start_in_file;
+  int64_t length;
+};
+
 struct _openslide_dicom_level {
   int64_t image_w;
   int64_t image_h;
@@ -51,6 +61,10 @@ struct _openslide_dicom_level {
   int64_t tiles_down;
   //uint16_t photometric;
   bool is_icon;
+  char hash[512];
+  enum image_format image_format;
+  int fileno;
+  struct tile *tiles;
 };
 
 bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
