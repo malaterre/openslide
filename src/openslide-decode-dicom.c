@@ -107,13 +107,11 @@ static bool source_skip( source * s, uint32_t len )
 
 static bool read_preamble(FILE * stream)
 {
-  int ret = fseeko(stream, 128, SEEK_SET );
-  assert( ret == 0 );
   char buf[4];
-  size_t n = fread( buf, sizeof *buf, sizeof buf, stream );
-  assert( n == 4 );
-  assert( strncmp( buf, "DICM", 4 ) == 0 );
-  return true;
+  int ret = fseeko(stream, 128, SEEK_SET );
+  if( ret != 0 ) return 0;
+  const size_t n = fread( buf, sizeof *buf, sizeof buf, stream );
+  return n == 4 && strncmp( buf, "DICM", 4 ) == 0;
 }
 
 typedef uint32_t tag_t;
@@ -644,21 +642,21 @@ static bool read_meta( FILE * stream )
 {
   data_element de = { 0 /* tag */ };
   if( !read_explicit( &de, stream ) ) return false;
-  assert( de.tag == MAKE_TAG(0x2,0x0) );
-  assert( de.vr == E_UL );
-  assert( de.vl == 4 );
+  if( de.tag != MAKE_TAG(0x2,0x0)
+    || de.vr != E_UL
+    || de.vl != 4 ) return false;
   // file meta group length
   uint32_t gl;
   if( !read_ul( stream, &gl ) ) return false;
   // for now skip the meta header:
-  fseeko( stream, gl, SEEK_CUR );
-  return true;
+  const int ret = fseeko( stream, gl, SEEK_CUR );
+  return ret == 0;
 }
 
 static void process_attribute( dataset *ds, data_element *de, FILE * stream )
 {
   assert( !is_start(de) && !is_end_item(de) && !is_end_sq(de) );
-  // TODO: do not set group length, they are deprecated
+  // TODO: do not send group length, they are deprecated
   if( is_undef_len(de) )
     {
     if( ds->handle_attribute ) (ds->handle_attribute)(ds, de, NULL);
@@ -875,15 +873,9 @@ static const char *trimwhitespace(char *str)
 static void handle_attribute1( /*const*/ dataset * ds, const data_element * de, source * s )
 {
   GSList * list = (GList*)ds->data;
-  //uvr_t u;
-  //u.vr = de->vr;
-  assert( de->vr != E_INVALID );
-  //print_indent(ds);
-  //printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
-    print_path( ds->cur_tp );
     size_t len = source_size(s);
     char buf[128];
     assert( len < 127 );
@@ -897,9 +889,7 @@ static void handle_attribute1( /*const*/ dataset * ds, const data_element * de, 
       if( *p == '\\' ) *p = '/';
       ++p;
       }
-    //printf( "%s\n", buf );
     list = g_slist_append (list, strdup(trimwhitespace(buf)));
-    //printf( "%d\n", g_slist_length (list) );
     }
   ds->data = list;
 }
@@ -920,15 +910,9 @@ struct dicom_info {
 static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, source * s )
 {
   struct dicom_info *di = (struct dicom_info*)ds->data;
-  uvr_t u;
-  u.vr = de->vr;
-  assert( de->vr != E_INVALID );
-  //print_indent(ds);
-  //printf( "%04x,%04x %c%c %d\n", get_group(de->tag), get_element(de->tag), u.str[0], u.str[1], de->vl );
   const bool b = find_tag_path( ds->tps, ds->cur_tp );
   if( b )
     {
-    print_path( ds->cur_tp );
     tag_t last = last_tag( ds->cur_tp );
     char buf[512];
     size_t len = source_size(s);
