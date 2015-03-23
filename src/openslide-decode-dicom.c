@@ -713,7 +713,6 @@ static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
     assert( is_start(&de) );
 
     if( ds->handle_pixel_data_item )  (ds->handle_pixel_data_item)( ds, stream, de.vl );
-    fseeko(stream, de.vl, SEEK_CUR );
     epdlen += de.vl;
     } while( 1 );
 
@@ -910,6 +909,7 @@ static void handle_pdi( dataset * ds, FILE * stream, const uint32_t len )
     di->tiles = malloc( di->number_of_frames * sizeof( struct tile ) );
     di->current_tile_num = 0;
     // discard Basic Offset Table for now
+    fseeko(stream, len, SEEK_CUR );
     return;
     }
   tiles = di->tiles;
@@ -918,6 +918,7 @@ static void handle_pdi( dataset * ds, FILE * stream, const uint32_t len )
   tiles[ di->current_tile_num ].start_in_file = ftello(stream);
   tiles[ di->current_tile_num ].length = len;
   di->current_tile_num++;
+  fseeko(stream, len, SEEK_CUR );
 }
 
 struct _openslide_dicom {
@@ -1109,6 +1110,7 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
 bool _openslide_dicom_is_dicomdir(const char *filename, GError **err)
 {
   FILE *stream = _openslide_fopen(filename, "rb", err);
+  // May check extra attributes in the long term here
   const bool ret = read_preamble(stream);
   fclose(stream);
   return ret;
