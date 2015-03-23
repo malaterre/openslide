@@ -255,7 +255,7 @@ typedef struct {
   int size;
 } tag_path;
 
-tag_path * create_tag_path()
+static tag_path * create_tag_path(void)
 {
   tag_path *ptr = (tag_path*)malloc( sizeof(tag_path) );
   // for now restrict path of max 16 attributes:
@@ -265,21 +265,20 @@ tag_path * create_tag_path()
   return ptr;
 }
 
-void destroy_path(tag_path *tp)
+static void destroy_path(tag_path *tp)
 {
   free( tp->tags );
   free( tp );
 }
 
-tag_path * clear_path(tag_path *tp)
+static tag_path * clear_path(tag_path *tp)
 {
   tp->ntags = 0;
   return tp;
 }
 
-tag_path * push_tag( tag_path * tp, tag_t t )
+static tag_path * push_tag( tag_path * tp, tag_t t )
 {
-  //printf( "%04x %04x\n", get_group(t), get_element(t) );
   if( tp->ntags < tp->size )
     {
     tag_t * ptr = tp->tags + tp->ntags;
@@ -293,20 +292,20 @@ tag_path * push_tag( tag_path * tp, tag_t t )
   return tp;
 }
 
-tag_t pop_tag( tag_path * tp )
+static tag_t pop_tag( tag_path * tp )
 {
   tp->ntags--;
   const tag_t * ptr = tp->tags + tp->ntags;
   return *ptr;
 }
 
-tag_t last_tag( tag_path * tp )
+static tag_t last_tag( tag_path * tp )
 {
   const tag_t * ptr = tp->tags + (tp->ntags - 1);
   return *ptr;
 }
 
-bool tag_path_equal_to( tag_path * tp1, tag_path * tp2 )
+static bool tag_path_equal_to( tag_path * tp1, tag_path * tp2 )
 {
   if( tp1->ntags == tp2->ntags )
     {
@@ -328,7 +327,7 @@ typedef struct {
   int nsets;
 } tag_path_set;
 
-tag_path_set * create_tag_path_set()
+static tag_path_set * create_tag_path_set(void)
 {
   tag_path_set *ptr = (tag_path_set*)malloc( sizeof(tag_path_set) );
   ptr->tags = malloc( 512 * sizeof(tag_t) );
@@ -338,14 +337,14 @@ tag_path_set * create_tag_path_set()
   return ptr;
 }
 
-void destroy_path_set( tag_path_set * tps )
+static void destroy_path_set( tag_path_set * tps )
 {
   free( tps->ntags );
   free( tps->tags );
   free( tps );
 }
 
-bool find_tag_path( tag_path_set *tps, tag_path *tp )
+static bool find_tag_path( tag_path_set *tps, tag_path *tp )
 {
   int s;
   int total = 0;
@@ -363,7 +362,7 @@ bool find_tag_path( tag_path_set *tps, tag_path *tp )
   return false;
 }
 
-void add_tag_path( tag_path_set *tps, tag_path *tp )
+static void add_tag_path( tag_path_set *tps, tag_path *tp )
 {
   int s;
   int total = 0;
@@ -391,7 +390,7 @@ struct dataset {
   void *data;
 };
 
-tag_path * get_tag_path( dataset * ds )
+static tag_path * get_tag_path( dataset * ds )
 {
   return ds->cur_tp;
 }
@@ -667,8 +666,8 @@ static uint32_t read_sq_undef( dataset * ds, FILE * stream )
       }
     else
       {
-      seqlen += 4 /* tag */ + 4 /* vl */ + de.vl;
       read_item_def( ds, stream, de.vl );
+      seqlen += 4 /* tag */ + 4 /* vl */ + de.vl;
       }
     } while( 1 );
 
@@ -738,15 +737,10 @@ static const char *trimwhitespace(char *str)
 {
   char *end;
   while(*str == ' ') str++;
-
-  if(*str == 0)
-    return str;
-
+  if(*str == 0) return str;
   end = str + strlen(str) - 1;
   while(end > str && *end == ' ') end--;
-
   *(end+1) = 0;
-
   return str;
 }
 
@@ -925,10 +919,8 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
   return instance;
 }
 
-bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, gchar **datafile_paths_out)
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, char **datafile_paths_out)
 {
-  // (0004,1500) CS [CDCAB791\CDCAB791\7A474CCD\CDCAB790 ]         # 36,1-8 Referenced File ID
-  // 0004,1220>0004,1500
   assert( instance->ds.tps->nsets == 0 );
     {
     tag_path *tp = create_tag_path();
@@ -1078,8 +1070,6 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
     dicoml->tiles_down = (ih / th) + !!(ih % th);
     assert( dicoml->tiles_across * dicoml->tiles_down == di.number_of_frames );
 
-    //tiffl->tile_read_direct = read_direct;
-    //tiffl->photometric = photometric;
     dicoml->is_icon = false;
     if( strcmp( di.code_value, "A-00118 " ) == 0 )
       {

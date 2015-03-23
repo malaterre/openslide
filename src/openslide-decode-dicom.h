@@ -37,10 +37,7 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
 
 void _openslide_dicom_destroy(struct _openslide_dicom *d);
 
-bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, gchar **datafile_paths);
-
-// helpful printout?
-//void _openslide_dicomdir_print(struct _openslide_dicom *d);
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, char **datafile_paths);
 
 enum image_format {
   FORMAT_UNKNOWN,
@@ -59,7 +56,6 @@ struct _openslide_dicom_level {
   int64_t tile_h;
   int64_t tiles_across;
   int64_t tiles_down;
-  //uint16_t photometric;
   bool is_icon;
   char hash[512];
   enum image_format image_format;
@@ -71,5 +67,4 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_level *level,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err);
-
 #endif
