@@ -51,6 +51,7 @@
  * could have been skipped. Since OpenSlide assumes direct file access, this
  * may be of little use.
  */
+#if 0
 typedef struct
 {
   FILE * stream;
@@ -104,6 +105,7 @@ static bool source_skip( source * s, uint32_t len )
   assert( s->cur_pos <= s->max_len );
   return b /*&& len == llen*/;
 }
+#endif
 
 static bool read_preamble(FILE * stream)
 {
@@ -342,6 +344,7 @@ tag_path * clear_path(tag_path *tp)
 
 tag_path * push_tag( tag_path * tp, tag_t t )
 {
+  //printf( "%04x %04x\n", get_group(t), get_element(t) );
   if( tp->ntags < tp->size )
     {
     tag_t * ptr = tp->tags + tp->ntags;
@@ -485,8 +488,8 @@ typedef struct dataset dataset;
 struct dataset {
   tag_path *cur_tp;
   tag_path_set *tps;
-  void (*handle_attribute)(/*const*/ dataset * ds, const data_element * de, source * value);
-  void (*handle_pixel_data_item)(/*const*/ dataset * ds, int64_t pos, uint32_t len);
+  void (*handle_attribute)( dataset * ds, FILE * stream, uint32_t len );
+  void (*handle_pixel_data_item)( dataset * ds, FILE * stream, uint32_t len);
   void *data;
 };
 
@@ -659,18 +662,11 @@ static void process_attribute( dataset *ds, data_element *de, FILE * stream )
   // TODO: do not send group length, they are deprecated
   if( is_undef_len(de) )
     {
-    if( ds->handle_attribute ) (ds->handle_attribute)(ds, de, NULL);
+    if( ds->handle_attribute ) (ds->handle_attribute)(ds, NULL, de->vl);
     }
   else
     {
-    source s;
-    init_source( &s, stream, de->vl );
-    if( ds->handle_attribute ) (ds->handle_attribute)(ds, de, &s);
-
-    size_t siz = source_size(&s);
-    // go to end of value:
-    bool b = source_skip( &s, siz );
-    assert( b );
+    if( ds->handle_attribute ) (ds->handle_attribute)(ds, stream, de->vl);
     }
 }
 
@@ -815,7 +811,7 @@ static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
     if( is_end_sq(&de) ) break;
     assert( is_start(&de) );
 
-    if( ds->handle_pixel_data_item )  (ds->handle_pixel_data_item)( ds, ftello(stream), de.vl );
+    if( ds->handle_pixel_data_item )  (ds->handle_pixel_data_item)( ds, stream, de.vl );
     fseeko(stream, de.vl, SEEK_CUR );
     epdlen += de.vl;
     } while( 1 );
@@ -870,17 +866,13 @@ static const char *trimwhitespace(char *str)
   return str;
 }
 
-static void handle_attribute1( /*const*/ dataset * ds, const data_element * de, source * s )
+static void handle_attribute1( dataset * ds, FILE * stream, const uint32_t len )
 {
-  GSList * list = (GList*)ds->data;
-  const bool b = find_tag_path( ds->tps, ds->cur_tp );
-  if( b )
+  if( find_tag_path( ds->tps, ds->cur_tp ) )
     {
-    size_t len = source_size(s);
-    char buf[128];
-    assert( len < 127 );
-    bool b = source_read( s, buf, len );
-    assert(b);
+    GSList * list = (GList*)ds->data;
+    char buf[512];
+    fread( buf, 1, len, stream );
     buf[len] = 0;
     // change windows style backslash into UNIX style forward slash
     char * p = buf;
@@ -890,8 +882,12 @@ static void handle_attribute1( /*const*/ dataset * ds, const data_element * de, 
       ++p;
       }
     list = g_slist_append (list, strdup(trimwhitespace(buf)));
+    ds->data = list;
     }
-  ds->data = list;
+  else
+    {
+    if(stream) fseeko(stream, len, SEEK_CUR);
+    }
 }
 
 struct dicom_info {
@@ -907,17 +903,15 @@ struct dicom_info {
   int current_tile_num;
 };
 
-static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, source * s )
+static void handle_attribute2( dataset * ds, FILE * stream, const uint32_t len )
 {
   struct dicom_info *di = (struct dicom_info*)ds->data;
-  const bool b = find_tag_path( ds->tps, ds->cur_tp );
-  if( b )
+  if( find_tag_path( ds->tps, ds->cur_tp ) )
     {
     tag_t last = last_tag( ds->cur_tp );
     char buf[512];
-    size_t len = source_size(s);
     assert( len < 512 );
-    bool b = source_read( s, buf, len );
+    fread(buf, 1, len, stream);
     buf[len] = 0;
     uint16_t us;
     uint32_t ul;
@@ -950,12 +944,17 @@ static void handle_attribute2( /*const*/ dataset * ds, const data_element * de, 
         di->total_pixel_mat_rows = ul;
         break;
       default:
+        // programmer error, need to handle attribute
         assert(0);
       }
     }
+  else
+    {
+    if(stream) fseeko( stream, len, SEEK_CUR );
+    }
 }
 
-static void handle_pdi( /*const*/ dataset * ds, int64_t pos, uint32_t len )
+static void handle_pdi( dataset * ds, FILE * stream, const uint32_t len )
 {
   struct dicom_info *di = (struct dicom_info*)ds->data;
   struct tile * tiles = NULL;
@@ -970,7 +969,7 @@ static void handle_pdi( /*const*/ dataset * ds, int64_t pos, uint32_t len )
   tiles = di->tiles;
   assert( tiles );
   assert( di->current_tile_num < di->number_of_frames );
-  tiles[ di->current_tile_num ].start_in_file = pos;
+  tiles[ di->current_tile_num ].start_in_file = ftello(stream);
   tiles[ di->current_tile_num ].length = len;
   di->current_tile_num++;
 }
@@ -996,6 +995,7 @@ static bool read_dataset( dataset * ds, FILE * stream )
           assert(0);
           }
         const uint32_t epdlen = read_encapsulated_pixel_data( ds, stream );
+        (void)epdlen;
         }
       else
         {
