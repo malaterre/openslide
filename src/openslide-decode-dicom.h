@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <glib.h>
 
-/* DICOM container support */
+/* DICOM container support for VL Whole Slide Microscopy Image Storage (1.2.840.10008.5.1.4.1.1.77.1.6) */
 /* Thread-safe. */
 
 struct _openslide_dicom *_openslide_dicom_create(const char *filename,

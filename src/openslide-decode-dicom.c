@@ -34,24 +34,34 @@
 
 /*
  * Implementation details: this is a dumb DICOM parser.
- * It has not built-in DICOM dictionary. This is a very limited implementation
- * of a Part-10 conforming implementation, which can only deals with WSMIS
- * instance and DICOMDIR index (it will not handle implicit and Big Endian
- * Explicit TS by design, which makes it a non-standard DICOM parser, but allow
- * a very simple implementation for OpenSlide).
+ * It has not built-in DICOM dictionary, to make the code lightweight. This is
+ * a limited implementation of a Part-10 conforming implementation, which can
+ * only deals with WSMIS instance and DICOMDIR index (it will not handle
+ * implicit and Big Endian Explicit TS by design, which makes it a non-standard
+ * DICOM parser, but allow a very simple implementation for OpenSlide).
  * Since it does not allow Implicit TS, it will be incapable of dealing with
  * Undefined Length VR:UN attributes which can only ever appears after an
- * Implicit -> Explicit conversion. This is technically impossible for WSMIS
- * instances (and thus not handled here).
- * 
- * Quickhash comes from: (0002,0003) Media Storage SOP Instance UID
+ * Implicit -> Explicit conversion (aka IVRLE). This is technically impossible
+ * for WSMIS instances (and thus not handled here).
  *
- * Optimisations:
+ * Application programmer should only set a function for `handle_attribute` and
+ * `handle_pixel_data_item`. See `tag_path` for a XML Path interface-like.
+ * 
+ * Initially the Quickhash came from: (0002,0003) Media Storage SOP Instance
+ * UID of the DICOMDIR but this is incorrect, since an application could
+ * generate on-the-fly another DICOMDIR pointing to the very same DataSet
+ * instances.
+ * Because OpenSlide (as of ABI 1.0) only deal with single slide, using the
+ * Study Instance UID is enough to generate a unique quickhash. In the long
+ * term one may want to pad the quickhash with the Series Instance UID.
+ *
+ * Later optimisations:
  * It will always parse everything, while some Defined Length Item / Sequence
  * could have been skipped. Since OpenSlide assumes direct file access, this
  * may be of little use.
  */
 
+// BEGIN DICOM Implementation
 static bool read_preamble(FILE * stream)
 {
   char buf[4];
@@ -203,7 +213,6 @@ static inline bool tag_is_lower( const data_element * de, tag_t tag )
 static inline bool is_start( const data_element * de )
 {
   static const tag_t start = MAKE_TAG( 0xfffe,0xe000 );
-  // can be undefined or defined length
   return de->tag == start;
 }
 static inline bool is_end_item( const data_element * de )
@@ -519,6 +528,7 @@ static inline bool read_ul( FILE * stream, uint32_t * value )
   return true;
 }
 
+// read header
 static bool read_meta( FILE * stream )
 {
   data_element de = { 0 /* tag */ };
@@ -529,7 +539,7 @@ static bool read_meta( FILE * stream )
   // file meta group length
   uint32_t gl;
   if( !read_ul( stream, &gl ) ) return false;
-  // for now skip the meta header:
+  // for now skip the meta header (we may check extra info here one day)
   const int ret = fseeko( stream, gl, SEEK_CUR );
   return ret == 0;
 }
@@ -537,7 +547,6 @@ static bool read_meta( FILE * stream )
 static void process_attribute( dataset *ds, data_element *de, FILE * stream )
 {
   assert( !is_start(de) && !is_end_item(de) && !is_end_sq(de) );
-  // TODO: do not send group length, they are deprecated
   if( is_undef_len(de) )
     {
     if( ds->handle_attribute ) (ds->handle_attribute)(ds, NULL, de->vl);
@@ -672,7 +681,7 @@ static uint32_t read_sq_undef( dataset * ds, FILE * stream )
   return seqlen;
 }
 
-/* Nested Icon SQ  (with encapsulated Pixel Data) */
+/* Encapsulated Pixel Data (one JPEG stream per Item) */
 static uint32_t read_encapsulated_pixel_data( dataset * ds, FILE * stream )
 {
   data_element de;
@@ -728,6 +737,69 @@ static void read_sq_def( dataset * ds, FILE * stream, const uint32_t seqlen )
     }
 }
 
+// Main loop
+static bool read_dataset( dataset * ds, FILE * stream )
+{
+  data_element de = { 0 /* tag */ };
+  while( read_explicit( &de, stream ) )
+    {
+    assert( get_group( de.tag ) != 0xfffe );
+    assert( get_group( de.tag ) <= 0x7fe0 );
+    push_tag( ds->cur_tp, de.tag );
+    if( is_undef_len(&de) )
+      {
+      process_attribute( ds, &de, stream );
+      if( de.vr != E_SQ )
+        {
+        assert( is_encapsulated_pixel_data( &de ) );
+        if( de.vr == E_UN ) // IVRLE !
+          {
+          // Technically a Sequence could be stored with VR:UN, this does
+          // not make sense in the WSMIS world, thus it is not handled.
+          assert(0);
+          }
+        read_encapsulated_pixel_data( ds, stream );
+        }
+      else
+        {
+        assert( de.vr == E_SQ );
+        read_sq_undef(ds, stream);
+        }
+      }
+    else
+      {
+      if( de.vr == E_SQ )
+        {
+        read_sq_def( ds, stream, de.vl );
+        }
+      else
+        {
+        process_attribute( ds, &de, stream );
+        }
+      }
+    pop_tag( ds->cur_tp );
+    }
+  assert( feof( stream ) );
+  return true;
+}
+
+// END DICOM Implementation
+
+// OpenSlide specific hooks (may use glib)
+
+struct dicom_info {
+  int number_of_frames;
+  int rows;
+  int columns;
+  int total_pixel_mat_cols;
+  int total_pixel_mat_rows;
+  char code_value[16];
+  char study_instance_uid[64];
+  int study_instance_uid_len;
+  struct tile *tiles;
+  int current_tile_num;
+};
+
 static const char *trimwhitespace(char *str)
 {
   char *end;
@@ -762,19 +834,6 @@ static void handle_attribute1( dataset * ds, FILE * stream, const uint32_t len )
     if(stream) fseeko(stream, len, SEEK_CUR);
     }
 }
-
-struct dicom_info {
-  int number_of_frames;
-  int rows;
-  int columns;
-  int total_pixel_mat_cols;
-  int total_pixel_mat_rows;
-  char code_value[16];
-  char study_instance_uid[64];
-  int study_instance_uid_len;
-  struct tile *tiles;
-  int current_tile_num;
-};
 
 static void handle_attribute2( dataset * ds, FILE * stream, const uint32_t len )
 {
@@ -847,52 +906,6 @@ static void handle_pdi( dataset * ds, FILE * stream, const uint32_t len )
   di->current_tile_num++;
 }
 
-static bool read_dataset( dataset * ds, FILE * stream )
-{
-  data_element de = { 0 /* tag */ };
-  while( read_explicit( &de, stream ) )
-    {
-    assert( get_group( de.tag ) != 0xfffe );
-    assert( get_group( de.tag ) <= 0x7fe0 );
-    push_tag( ds->cur_tp, de.tag );
-    if( is_undef_len(&de) )
-      {
-      process_attribute( ds, &de, stream );
-      if( de.vr != E_SQ )
-        {
-        assert( is_encapsulated_pixel_data( &de ) );
-        if( de.vr == E_UN ) // IVRLE !
-          {
-          // FIXME: technically a Sequence could be stored with VR:UN, this does
-          // not make sense in the WSI world, thus it is not handled.
-          assert(0);
-          }
-        const uint32_t epdlen = read_encapsulated_pixel_data( ds, stream );
-        (void)epdlen;
-        }
-      else
-        {
-        assert( de.vr == E_SQ );
-        read_sq_undef(ds, stream);
-        }
-      }
-    else
-      {
-      if( de.vr == E_SQ )
-        {
-        read_sq_def( ds, stream, de.vl );
-        }
-      else
-        {
-        process_attribute( ds, &de, stream );
-        }
-      }
-    pop_tag( ds->cur_tp );
-    }
-  assert( feof( stream ) );
-  return true;
-}
-
 struct _openslide_dicom {
   FILE * stream;
   dataset ds;
@@ -916,6 +929,7 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
 
 bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, char ***datafile_paths_out)
 {
+  // Setup reader to parse DICOMDIR instances
   assert( instance->ds.tps->nsets == 0 );
     {
     tag_path *tp = create_tag_path();
@@ -933,7 +947,6 @@ bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * 
     || !read_meta( instance->stream )
     || !read_dataset( &instance->ds, instance->stream ) )
     {
-    assert(0);
     return false;
     }
   guint len = g_slist_length (instance->ds.data);
@@ -972,6 +985,7 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err)
 {
+  // Setup reader to parse WSMIS instances
   (void)err;
   tag_path *tp = create_tag_path();
     {
@@ -1031,7 +1045,6 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
     || !read_meta( instance->stream )
     || !read_dataset( &instance->ds, instance->stream ) )
     {
-    assert(0);
     return false;
     }
 
@@ -1055,7 +1068,6 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
   }
 
   if (dicoml) {
-    //tiffl->dir = dir;
     dicoml->image_w = iw;
     dicoml->image_h = ih;
     dicoml->tile_w = tw;

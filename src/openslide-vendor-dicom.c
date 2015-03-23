@@ -22,7 +22,7 @@
 /*
  * DICOM support for VL Whole Slide Microscopy Image Storage (1.2.840.10008.5.1.4.1.1.77.1.6)
  *
- * quickhash comes from (0008,0018) SOP Instance UID
+ * quickhash comes from (0020,000d) Study Instance UID
  *
  */
 
@@ -31,7 +31,6 @@
 #include "openslide-private.h"
 #include "openslide-decode-dicom.h"
 #include "openslide-decode-jpeg.h"
-#include "openslide-decode-tiff.h" // _openslide_tiff_clip_tile
 
 #include <glib.h>
 #include <string.h>
@@ -68,7 +67,7 @@ static bool read_tile(openslide_t *osr,
                       GError **err) {
   struct level *l = (struct level *) level;
   struct _openslide_dicom_level *dicoml = &l->dicoml;
-  struct dicom_wsmis_ops_data *data = arg; // see _openslide_grid_paint_region call (below)
+  struct dicom_wsmis_ops_data *data = arg;
 
   // tile size
   int64_t tw = dicoml->tile_w;
