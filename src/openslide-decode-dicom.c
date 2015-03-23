@@ -390,11 +390,6 @@ struct dataset {
   void *data;
 };
 
-static tag_path * get_tag_path( dataset * ds )
-{
-  return ds->cur_tp;
-}
-
 // explicit
 static bool read_explicit( data_element * de, FILE * stream )
 {
@@ -748,7 +743,7 @@ static void handle_attribute1( dataset * ds, FILE * stream, const uint32_t len )
 {
   if( find_tag_path( ds->tps, ds->cur_tp ) )
     {
-    GSList * list = (GList*)ds->data;
+    GSList * list = (GSList*)ds->data;
     char buf[512];
     fread( buf, 1, len, stream );
     buf[len] = 0;
@@ -919,7 +914,7 @@ struct _openslide_dicom *_openslide_dicom_create(const char *filename,
   return instance;
 }
 
-bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, char **datafile_paths_out)
+bool _openslide_dicom_readindex(struct _openslide_dicom *instance, const char * dirname, char ***datafile_paths_out)
 {
   assert( instance->ds.tps->nsets == 0 );
     {
@@ -977,6 +972,7 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
                                 struct _openslide_dicom_level *dicoml,
                                 GError **err)
 {
+  (void)err;
   tag_path *tp = create_tag_path();
     {
     const tag_t t0 = MAKE_TAG(0x0020,0x000d); // Study Instance UID

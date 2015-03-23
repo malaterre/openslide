@@ -45,14 +45,11 @@ struct level {
 };
 
 struct dicom_wsmis_ops_data {
-  //struct _openslide_dicomcache *tc;
   gchar **datafile_paths;
 };
 
 static void destroy(openslide_t *osr) {
   struct dicom_wsmis_ops_data *data = osr->data;
-#if 0
-  _openslide_dicomcache_destroy(data->tc);
   g_slice_free(struct dicom_wsmis_ops_data, data);
 
   for (int32_t i = 0; i < osr->level_count; i++) {
@@ -61,7 +58,6 @@ static void destroy(openslide_t *osr) {
     g_slice_free(struct level, l);
   }
   g_free(osr->levels);
-#endif
 }
 
 static bool read_tile(openslide_t *osr,
@@ -94,9 +90,11 @@ static bool read_tile(openslide_t *osr,
     }
 
     // clip, if necessary
-    if (!_openslide_tiff_clip_tile(dicoml, tiledata,
-                                   tile_col, tile_row,
-                                   err)) {
+    if (!_openslide_clip_tile(tiledata,
+          dicoml->tile_w, dicoml->tile_h,
+          dicoml->image_w - tile_col * dicoml->tile_w,
+          dicoml->image_h - tile_row * dicoml->tile_h,
+          err) ) {
       g_slice_free1(tw * th * 4, tiledata);
       return false;
     }
