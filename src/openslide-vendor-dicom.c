@@ -151,13 +151,6 @@ static bool dicom_wsmis_detect(const char *filename,
     return false;
   }
 
-  // verify filename
-  if (!g_str_has_suffix(filename, "DICOMDIR")) {
-    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "File does not have %s extension", "DICOMDIR");
-    return false;
-  }
-
   // verify existence
   if (!g_file_test(filename, G_FILE_TEST_EXISTS)) {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
@@ -165,12 +158,12 @@ static bool dicom_wsmis_detect(const char *filename,
     return false;
   }
 
-  // ensure DICOM is wsmis
-//  if (!_openslide_dicom_is_wsmis(tl, 0)) {
-//    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-//                "DICOM is not wsmis");
-//    return false;
-//  }
+  // ensure DICOM is DICOMDIR instance
+  if (!_openslide_dicom_is_dicomdir(filename, err)) {
+    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                "DICOM is not DICOMDIR");
+    return false;
+  }
 
   return true;
 }
@@ -193,7 +186,11 @@ static bool dicom_wsmis_open(openslide_t *osr, const char *filename,
                               struct _openslide_hash *quickhash1, GError **err) {
   char *dirname = NULL;
   // get directory from filename
-  dirname = g_strndup(filename, strlen(filename) - strlen("DICOMDIR"));
+  char *end = strrchr(filename, '/');
+  if( end )
+    dirname = g_strndup(filename, end - filename );
+  else
+    dirname = g_strndup(".", 1);
 
   struct _openslide_dicom * instance = _openslide_dicom_create(filename, err);
 

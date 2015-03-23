@@ -61,6 +61,19 @@
  * may be of little use.
  */
 
+/*
+ * (Move to OpenSlide Wiki ?)
+ * Instructions for Non-DICOM user, when no DICOMDIR
+ *
+ * Inputs are `Dog_15x15_20x.dcm` and `Dog_15x15_40x.dcm`
+ *
+ * Steps:
+ * $ mv Dog_15x15_20x.dcm DOG15_20
+ * $ mv Dog_15x15_40x.dcm DOG15_40
+ * $ dcmmkdir --output-file DOGDIR --general-purpose-dvd DOG15_20 DOG15_40
+ * -> Points openslide to the newly created index file: `DOGDIR`
+ */
+
 // BEGIN DICOM Implementation
 static bool read_preamble(FILE * stream)
 {
@@ -1090,4 +1103,12 @@ bool _openslide_dicom_level_init(struct _openslide_dicom *instance,
   }
 
   return true;
+}
+
+bool _openslide_dicom_is_dicomdir(const char *filename, GError **err)
+{
+  FILE *stream = _openslide_fopen(filename, "rb", err);
+  const bool ret = read_preamble(stream);
+  fclose(stream);
+  return ret;
 }

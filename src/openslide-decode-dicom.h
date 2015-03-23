@@ -32,6 +32,8 @@
 /* DICOM container support for VL Whole Slide Microscopy Image Storage (1.2.840.10008.5.1.4.1.1.77.1.6) */
 /* Thread-safe. */
 
+bool _openslide_dicom_is_dicomdir(const char *filename, GError **err);
+
 struct _openslide_dicom *_openslide_dicom_create(const char *filename,
                                                        GError **err);
 
