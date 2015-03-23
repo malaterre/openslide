@@ -51,66 +51,11 @@
  * could have been skipped. Since OpenSlide assumes direct file access, this
  * may be of little use.
  */
-#if 0
-typedef struct
-{
-  FILE * stream;
-  size_t max_len;
-  size_t cur_pos;
-} source;
-
-void init_source( source *s, FILE * stream, uint32_t len )
-{
-  s->stream = stream;
-  assert( len != (uint32_t)-1 );
-  s->max_len = len;
-  s->cur_pos = 0;
-}
-
-static size_t source_size(source * s)
-{
-  return s->max_len;
-}
-static size_t source_tell(source * s)
-{
-  return s->cur_pos;
-}
-static inline size_t min( size_t a, size_t b )
-{
-  return a < b ? a : b;
-}
-static bool source_read( source * s, char * out, size_t len )
-{
-  assert( s->cur_pos <= s->max_len );
-  size_t llen = min( len , s->max_len - s->cur_pos );
-  const size_t ret = fread( out, 1, len, s->stream );
-  const bool b = ret == len;
-  s->cur_pos += llen;
-  assert( s->cur_pos <= s->max_len );
-  return b && len == llen;
-}
-/* will skip up to len bytes (never more than max size) */
-static bool source_skip( source * s, uint32_t len )
-{
-  assert( s->cur_pos <= s->max_len );
-  const size_t llen = min( len , s->max_len - s->cur_pos );
-  bool b = true;
-  if( llen )
-    {
-    int ret = fseeko(s->stream, llen, SEEK_CUR );
-    b = ret == 0;
-    assert( b );
-    s->cur_pos += llen;
-    }
-  assert( s->cur_pos <= s->max_len );
-  return b /*&& len == llen*/;
-}
-#endif
 
 static bool read_preamble(FILE * stream)
 {
   char buf[4];
-  int ret = fseeko(stream, 128, SEEK_SET );
+  const int ret = fseeko(stream, 128, SEEK_SET );
   if( ret != 0 ) return 0;
   const size_t n = fread( buf, sizeof *buf, sizeof buf, stream );
   return n == 4 && strncmp( buf, "DICM", 4 ) == 0;
@@ -190,7 +135,6 @@ enum {
 
 static inline bool isvr_valid( const uvr_t uvr )
 {
-  //assert( vr >= MAKE_VR('A','A') && vr <= MAKE_VR('Z','Z') );
   if( uvr.str[0] < 'A' || uvr.str[0] > 'Z' ) return false;
   if( uvr.str[1] < 'A' || uvr.str[1] > 'Z' ) return false;
   return true;
@@ -259,23 +203,18 @@ static inline bool tag_is_lower( const data_element * de, tag_t tag )
 static inline bool is_start( const data_element * de )
 {
   static const tag_t start = MAKE_TAG( 0xfffe,0xe000 );
-  const bool b = de->tag == start;
   // can be undefined or defined length
-  return b;
+  return de->tag == start;
 }
 static inline bool is_end_item( const data_element * de )
 {
   static const tag_t end_item = MAKE_TAG( 0xfffe,0xe00d );
-  const bool b = de->tag == end_item;
-  if( b ) assert( de->vl == 0 );
-  return b;
+  return de->tag == end_item;
 }
 static inline bool is_end_sq( const data_element * de )
 {
   static const tag_t end_sq = MAKE_TAG( 0xfffe,0xe0dd );
-  const bool b = de->tag == end_sq;
-  if( b ) assert( de->vl == 0 );
-  return b;
+  return de->tag == end_sq;
 }
 static inline bool is_encapsulated_pixel_data( const data_element * de )
 {
@@ -298,8 +237,7 @@ static inline bool is_undef_len( const data_element * de )
 static inline uint32_t compute_len( const data_element * de )
 {
   assert( !is_undef_len( de ) );
-  const bool is32 = isvr32( de->vr );
-  if( is32 )
+  if( isvr32( de->vr ) )
     {
     return 4 /* tag */ + 4 /* VR */ + 4 /* VL */ + de->vl /* VL */;
     }
@@ -320,13 +258,10 @@ typedef struct {
 tag_path * create_tag_path()
 {
   tag_path *ptr = (tag_path*)malloc( sizeof(tag_path) );
-#if 0
-  memset(ptr, 0, sizeof(tag_path));
-#else
+  // for now restrict path of max 16 attributes:
   ptr->tags = malloc( 16 * sizeof(tag_t) );
   ptr->ntags = 0;
   ptr->size = 16;
-#endif
   return ptr;
 }
 
@@ -378,49 +313,12 @@ bool tag_path_equal_to( tag_path * tp1, tag_path * tp2 )
     int t;
     for( t = 0; t < tp1->ntags; ++t )
       {
-      const tag_t * ptr1 = tp1->tags + t;
-      const tag_t * ptr2 = tp2->tags + t;
-      if( *ptr1 != *ptr2 ) return false;
+      if( tp1->tags[t] != tp2->tags[t] ) return false;
       }
     // ok
     return true;
     }
   return false;
-}
-
-bool tag_path_match( tag_path * tp1, tag_path * tp2 )
-{
-  if( tp1->ntags >= tp2->ntags )
-    {
-    int t;
-    for( t = 0; t < tp2->ntags; ++t )
-      {
-      const tag_t * ptr1 = tp1->tags + t;
-      const tag_t * ptr2 = tp2->tags + t;
-      if( *ptr1 != *ptr2 ) return false;
-      }
-    // ok
-    return true;
-    }
-  return false;
-}
-
-int tag_path_length( tag_path * tp )
-{
-  return tp->ntags;
-}
-
-void print_path( tag_path * tp )
-{
-  fprintf(stdout, "Path: " );
-  int t;
-  for( t = 0; t < tp->ntags; ++t )
-    {
-    if( t != 0 ) fprintf(stdout, ">" );
-    const tag_t * ptr = tp->tags + t;
-    fprintf(stdout, "%04x,%04x", get_group(*ptr), get_element(*ptr) );
-    }
-  fprintf(stdout, "\n" );
 }
 
 typedef struct {
@@ -498,16 +396,6 @@ tag_path * get_tag_path( dataset * ds )
   return ds->cur_tp;
 }
 
-static void print_indent(const dataset * ds)
-{
-  int i;
-  int indent = tag_path_length( ds->cur_tp );
-  for( i = 0; i < indent - 1; ++i )
-    {
-    printf( "  " );
-    }
-}
-
 // explicit
 static bool read_explicit( data_element * de, FILE * stream )
 {
@@ -524,11 +412,8 @@ static bool read_explicit( data_element * de, FILE * stream )
   // Value Representation
   n = fread( vr.str, sizeof *vr.str, 2, stream );
   /* a lot of VR are not valid (eg: non-ASCII), however the standard may add
-   * them in a future edition, so only exclude the impossible ones:
-   * - 0x0
-   */
+   * them in a future edition, so only exclude the impossible ones */
   if( n != 2 || !isvr_valid(vr) ) return false;
-  const bool is32 = isvr32( vr.vr );
 
   // padding and/or 16bits VL
   uvl16_t vl16;
@@ -536,7 +421,7 @@ static bool read_explicit( data_element * de, FILE * stream )
   if( n != 2 ) return false;
 
   // Value Length
-  if( is32 )
+  if( isvr32( vr.vr ) )
     {
     /* padding must be set to zero */
     if( vl16.vl16 != 0 ) return false;
@@ -582,7 +467,6 @@ static bool read_explicit_undef( data_element * de, FILE * stream )
     assert( get_group(t.tag) != 0xfffe );
     n = fread( vr.str, sizeof *vr.str, 2, stream );
     if( n != 2 || !isvr_valid(vr) ) return false;
-    const bool is32 = isvr32( vr.vr );
 
     // padding and/or 16bits VL
     uvl16_t vl16;
@@ -590,7 +474,7 @@ static bool read_explicit_undef( data_element * de, FILE * stream )
     if( n != 2 ) return false;
 
     // Value Length
-    if( is32 )
+    if( isvr32( vr.vr ) )
       {
       /* padding must be set to zero */
       if( vl16.vl16 != 0 ) return false;
